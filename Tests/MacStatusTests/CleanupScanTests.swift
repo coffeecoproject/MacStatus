@@ -81,6 +81,32 @@ struct CleanupScanTests {
         #expect(Set(updates.suffix(2).map(\.current)) == ["layermap", "empty"])
     }
 
+    /// Only refusals are tested; a successful move would put test files in the real Trash.
+    @Test func moveToTrashRefusesMissingLocationsAndSymbolicLinks() throws {
+        let home = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        try FileManager.default.createDirectory(at: home.appending(path: "elsewhere"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: home.appending(path: "Library/Caches"), withIntermediateDirectories: true)
+        let link = home.appending(path: "Library/Caches/pnpm")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: home.appending(path: "elsewhere"))
+        let pnpm = try #require(CleanupScan.safeLocations.first { $0.path == "Library/Caches/pnpm" })
+        let homebrew = try #require(CleanupScan.safeLocations.first { $0.path == "Library/Caches/Homebrew" })
+
+        #expect(throws: CocoaError.self) { try CleanupScan.moveToTrash(pnpm, home: home) }
+        #expect(throws: CocoaError.self) { try CleanupScan.moveToTrash(homebrew, home: home) }
+        #expect((try? link.checkResourceIsReachable()) == true)
+        #expect(FileManager.default.fileExists(atPath: home.appending(path: "elsewhere").path))
+    }
+
+    @Test func onlySafeEntriesCarryALocation() throws {
+        let report = try scan(
+            directories: ["Library/Caches/pnpm", "Library/Caches/layermap"],
+            sizes: ["pnpm": 1, "layermap": 18_000 * Self.megabyte]
+        )
+        #expect(report.safe.map(\.location?.path) == ["Library/Caches/pnpm"])
+        #expect(report.others.allSatisfy { $0.location == nil })
+    }
+
     @Test func missingCachesDirectoryGivesAnEmptyReport() throws {
         let report = try scan(directories: [], sizes: [:])
         #expect(report.safe.isEmpty)

@@ -4,11 +4,13 @@ import Foundation
 struct CleanupEntry: Identifiable, Equatable, Sendable {
     let url: URL
     let title: String
-    /// What happens after it is removed; only safe locations have one.
-    let note: String?
     let size: UInt64
+    /// The safe location it was found at; only these can be moved to the Trash.
+    let location: CleanupScan.Location?
 
     var id: String { url.path }
+    /// What happens after it is removed.
+    var note: String? { location?.note }
 }
 
 /// How far a scan has got, counted in directories; their sizes are unknown until walked.
@@ -31,9 +33,9 @@ struct CleanupReport: Equatable, Sendable {
     var safeTotal: UInt64 { safe.reduce(0) { $0 + $1.size } }
 }
 
-/// Read-only scan of the current user's caches. Only the fixed `safeLocations` are ever offered for removal.
+/// Scan of the current user's caches. Only the fixed `safeLocations` can ever be moved to the Trash.
 enum CleanupScan {
-    struct Location: Sendable {
+    struct Location: Equatable, Sendable {
         let title: String
         /// Relative to the home directory.
         let path: String
@@ -80,16 +82,25 @@ enum CleanupScan {
         }
         // Empty locations (e.g. DerivedData without Xcode in use) have nothing to offer.
         let safe = safeTargets.map { location, url in
-            CleanupEntry(url: url, title: location.title, note: location.note, size: measure(url, as: location.title))
+            CleanupEntry(url: url, title: location.title, size: measure(url, as: location.title), location: location)
         }.filter { $0.size > 0 }
         let others = otherURLs.map { url in
-            CleanupEntry(url: url, title: url.lastPathComponent, note: nil, size: measure(url, as: url.lastPathComponent))
+            CleanupEntry(url: url, title: url.lastPathComponent, size: measure(url, as: url.lastPathComponent), location: nil)
         }.filter { $0.size >= othersMinimum }
         return CleanupReport(
             safe: safe.sorted(by: bySize),
             others: Array(others.sorted(by: bySize).prefix(othersLimit)),
             scannedAt: Date()
         )
+    }
+
+    /// Moves a safe location to the Trash, where it can be restored; space is freed when the Trash is emptied.
+    /// Takes a location rather than a path, so nothing outside the fixed list can be removed.
+    static func moveToTrash(_ location: Location, home: URL) throws {
+        let url = home.appending(path: location.path).standardizedFileURL
+        // Checked again at removal time: the directory may have been replaced since the scan.
+        guard isDirectory(url) else { throw CocoaError(.fileNoSuchFile, userInfo: [NSFilePathErrorKey: url.path]) }
+        try FileManager.default.trashItem(at: url, resultingItemURL: nil)
     }
 
     /// Allocated size of the files under `url`, like `du`; symbolic links are not followed.
@@ -118,14 +129,16 @@ enum CleanupScan {
     }
 }
 
-/// Holds the latest scan; scans run only when asked, never on the refresh clock. The user waits on the
-/// result, so it runs at user-initiated priority; utility I/O is throttled to minutes under load.
+/// Holds the latest scan and runs removals; scans run only when asked, never on the refresh clock.
+/// The user waits on the result, so it runs at user-initiated priority; utility I/O is throttled to minutes under load.
 @MainActor
 final class CleanupModel: ObservableObject {
     @Published private(set) var report: CleanupReport?
     @Published private(set) var isScanning = false
     /// Nil until the scan has listed what it will walk.
     @Published private(set) var progress: CleanupProgress?
+    /// Why the last removal failed; cleared by the next one.
+    @Published private(set) var failure: String?
 
     func scan() {
         guard !isScanning else { return }
@@ -145,6 +158,18 @@ final class CleanupModel: ObservableObject {
             progress = nil
             isScanning = false
         }
+    }
+
+    /// A same-volume move, so it is quick even for large directories; the rescan then shows what is left.
+    func moveToTrash(_ location: CleanupScan.Location) {
+        guard !isScanning else { return }
+        do {
+            try CleanupScan.moveToTrash(location, home: FileManager.default.homeDirectoryForCurrentUser)
+            failure = nil
+        } catch {
+            failure = "未能移走“\(location.title)”：\(error.localizedDescription)"
+        }
+        scan()
     }
 
     func scanIfNeeded() {

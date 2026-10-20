@@ -1,7 +1,8 @@
 import MacSystemMetrics
 import SwiftUI
 
-/// Space that known tool caches take, and other large caches for reference. Nothing is removed here.
+/// Space that known tool caches take, which can be moved to the Trash one at a time after confirming,
+/// and other large caches for reference only.
 struct CleanupPage: View {
     let disk: MetricState<DiskReading>
     @ObservedObject var cleanup: CleanupModel
@@ -28,17 +29,26 @@ struct CleanupPage: View {
                     if report.safe.isEmpty {
                         Text("没有发现").foregroundStyle(.secondary)
                     }
-                    ForEach(report.safe) { CleanupRow(entry: $0) }
+                    ForEach(report.safe) { entry in
+                        CleanupRow(entry: entry, busy: cleanup.isScanning, moveToTrash: entry.location.map { location in
+                            { cleanup.moveToTrash(location) }
+                        })
+                    }
+                    if let failure = cleanup.failure {
+                        Text(failure)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.red)
+                    }
                 }
                 section("其他大缓存 · 由各 App 管理，仅供参考") {
                     if report.others.isEmpty {
                         Text("没有超过 \(Format.disk(CleanupScan.othersMinimum)) 的").foregroundStyle(.secondary)
                     }
-                    ForEach(report.others) { CleanupRow(entry: $0) }
+                    ForEach(report.others) { CleanupRow(entry: $0, busy: cleanup.isScanning, moveToTrash: nil) }
                 }
             }
             HStack {
-                Text("只读扫描，不会改动任何文件。")
+                Text("“清理”移到废纸篓，清空废纸篓后才腾出空间。")
                 Spacer()
                 Button("重新扫描") { cleanup.scan() }
                     .buttonStyle(.borderless)
@@ -88,23 +98,51 @@ private struct ScanProgress: View {
 
 private struct CleanupRow: View {
     let entry: CleanupEntry
+    /// Removal is off while a scan is running, since the list may be out of date.
+    let busy: Bool
+    /// Nil for entries that are only shown.
+    let moveToTrash: (() -> Void)?
+    /// Removal takes a second click, in place: an alert would take focus and close the panel.
+    @State private var confirming = false
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            VStack(alignment: .leading, spacing: 1) {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(entry.title)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                if let note = entry.note {
-                    Text(note)
+                Spacer(minLength: 8)
+                Text(Format.disk(entry.size))
+                    .monospacedDigit()
+                    .fixedSize()
+                if moveToTrash != nil, !confirming {
+                    Button("清理") { confirming = true }
+                        .buttonStyle(.borderless)
                         .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
+                        .disabled(busy)
+                        .accessibilityLabel("清理\(entry.title)")
                 }
             }
-            Spacer(minLength: 8)
-            Text(Format.disk(entry.size))
-                .monospacedDigit()
-                .fixedSize()
+            if confirming, let moveToTrash {
+                HStack(spacing: 8) {
+                    Text("移到废纸篓？可从废纸篓恢复")
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    Button("取消") { confirming = false }
+                    Button("移到废纸篓") {
+                        confirming = false
+                        moveToTrash()
+                    }
+                    .foregroundStyle(.red)
+                    .disabled(busy)
+                }
+                .buttonStyle(.borderless)
+                .font(.system(size: 10))
+            } else if let note = entry.note {
+                Text(note)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
         }
         .help(entry.url.path)
     }
