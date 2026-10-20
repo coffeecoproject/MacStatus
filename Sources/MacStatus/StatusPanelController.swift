@@ -27,8 +27,9 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         hosting = NSHostingController(rootView: StatusPanelView(monitor: monitor, model: model, cleanup: cleanup))
         super.init()
         subscriptions = [
-            model.$page.dropFirst().sink { [weak self] _ in
-                self?.pageChanged()
+            // Fires before `model.page` changes, so the new page is taken from the value sent.
+            model.$page.dropFirst().sink { [weak self] page in
+                self?.pageChanged(to: page)
             },
             // Reported during layout; refit on the next main-queue turn, outside it.
             model.$contentHeight.removeDuplicates().dropFirst().receive(on: DispatchQueue.main).sink { [weak self] _ in
@@ -77,7 +78,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
             return
         }
         panel.makeKeyAndOrderFront(nil)
-        monitor.setPanelDemand(panel.isVisible ? demand : .hidden)
+        monitor.setPanelDemand(panel.isVisible ? Self.demand(for: model.page) : .hidden)
     }
 
     func hide() {
@@ -93,16 +94,16 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         panel.close()
     }
 
-    private var demand: PanelDemand {
-        switch model.page {
+    private static func demand(for page: PanelPage) -> PanelDemand {
+        switch page {
         case .overview, .cleanup: .metrics
         case .processes: .processes
         }
     }
 
-    private func pageChanged() {
+    private func pageChanged(to page: PanelPage) {
         guard panel.isVisible else { return }
-        monitor.setPanelDemand(demand)
+        monitor.setPanelDemand(Self.demand(for: page))
     }
 
     /// Keeps the top edge under the menu bar as the content height changes.
