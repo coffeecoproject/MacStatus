@@ -8,6 +8,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
 
     private let monitor: SystemMonitor
     private let model = PanelModel()
+    private let cleanup = CleanupModel()
     private let hosting: NSHostingController<StatusPanelView>
     private let panel = MetricsPanel(
         contentRect: .zero,
@@ -23,7 +24,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
 
     init(monitor: SystemMonitor) {
         self.monitor = monitor
-        hosting = NSHostingController(rootView: StatusPanelView(monitor: monitor, model: model))
+        hosting = NSHostingController(rootView: StatusPanelView(monitor: monitor, model: model, cleanup: cleanup))
         super.init()
         // `@Published` fires before the view updates; measure on the next main-queue turn.
         subscriptions = [
@@ -32,6 +33,9 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
             },
             // Content height follows the data (rows, captions), so refit after each update.
             monitor.$snapshot.receive(on: DispatchQueue.main).sink { [weak self] _ in
+                self?.fitContent()
+            },
+            cleanup.objectWillChange.receive(on: DispatchQueue.main).sink { [weak self] _ in
                 self?.fitContent()
             }
         ]
@@ -95,7 +99,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
 
     private var demand: PanelDemand {
         switch model.page {
-        case .overview: .metrics
+        case .overview, .cleanup: .metrics
         case .processes: .processes
         }
     }
