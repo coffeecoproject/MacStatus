@@ -11,8 +11,7 @@ struct CleanupPage: View {
         MetricCard(
             title: "清理", symbol: "sparkles", tint: .teal,
             value: report.map { Format.disk($0.safeTotal) } ?? Format.placeholder,
-            caption: "可安全清理",
-            badge: cleanup.isScanning ? MetricBadge(text: "扫描中", color: .secondary) : nil
+            caption: "可安全清理"
         ) {
             DetailGrid(items: [
                 DetailItem(label: "硬盘可用", value: disk.value.map { Format.disk($0.available) } ?? Format.placeholder),
@@ -21,6 +20,9 @@ struct CleanupPage: View {
                     value: report.map { $0.scannedAt.formatted(.dateTime.hour().minute()) } ?? Format.placeholder
                 )
             ])
+            if cleanup.isScanning {
+                ScanProgress(progress: cleanup.progress)
+            }
             if let report {
                 section("可安全清理") {
                     if report.safe.isEmpty {
@@ -57,6 +59,30 @@ struct CleanupPage: View {
         }
         .font(.system(size: 11))
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct ScanProgress: View {
+    let progress: CleanupProgress?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            SegmentedBar(segments: [.init(id: "scan", fraction: progress?.fraction ?? 0, color: .teal)], height: 4)
+            HStack(spacing: 8) {
+                Text(progress.map { "正在扫描 \($0.current)" } ?? "正在列出目录…")
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 8)
+                if let progress {
+                    Text("\(progress.completed) / \(progress.total)")
+                        .monospacedDigit()
+                        .fixedSize()
+                }
+            }
+            .font(.system(size: 10))
+            .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 

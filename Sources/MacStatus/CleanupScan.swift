@@ -11,6 +11,16 @@ struct CleanupEntry: Identifiable, Equatable, Sendable {
     var id: String { url.path }
 }
 
+/// How far a scan has got, counted in directories; their sizes are unknown until walked.
+struct CleanupProgress: Equatable, Sendable {
+    let completed: Int
+    let total: Int
+    /// The directory being walked.
+    let current: String
+
+    var fraction: Double { total > 0 ? Double(completed) / Double(total) : 0 }
+}
+
 struct CleanupReport: Equatable, Sendable {
     /// Known tool caches that rebuild themselves; nothing else depends on them.
     let safe: [CleanupEntry]
@@ -45,21 +55,36 @@ enum CleanupScan {
     static let othersLimit = 8
 
     /// Walks every listed directory, so it takes seconds; run it off the main thread.
-    static func run(home: URL, size: (URL) -> UInt64 = allocatedSize(of:)) -> CleanupReport {
+    /// `progress` is called before each directory is walked.
+    static func run(
+        home: URL,
+        size: (URL) -> UInt64 = allocatedSize(of:),
+        progress: (CleanupProgress) -> Void = { _ in }
+    ) -> CleanupReport {
         let safeURLs = Set(safeLocations.map { home.appending(path: $0.path).standardizedFileURL })
-        // Empty locations (e.g. DerivedData without Xcode in use) have nothing to offer.
-        let safe = safeLocations.compactMap { location -> CleanupEntry? in
+        let safeTargets = safeLocations.compactMap { location -> (Location, URL)? in
             let url = home.appending(path: location.path).standardizedFileURL
-            guard isDirectory(url) else { return nil }
-            return CleanupEntry(url: url, title: location.title, note: location.note, size: size(url))
-        }.filter { $0.size > 0 }
+            return isDirectory(url) ? (location, url) : nil
+        }
         let cachesURL = home.appending(path: othersDirectory)
         let children = (try? FileManager.default.contentsOfDirectory(at: cachesURL, includingPropertiesForKeys: nil)) ?? []
-        let others = children
-            .map(\.standardizedFileURL)
-            .filter { !safeURLs.contains($0) && isDirectory($0) }
-            .map { CleanupEntry(url: $0, title: $0.lastPathComponent, note: nil, size: size($0)) }
-            .filter { $0.size >= othersMinimum }
+        let otherURLs = children.map(\.standardizedFileURL).filter { !safeURLs.contains($0) && isDirectory($0) }
+
+        // Everything to walk is listed first, so progress has a fixed total.
+        let total = safeTargets.count + otherURLs.count
+        var completed = 0
+        func measure(_ url: URL, as title: String) -> UInt64 {
+            progress(CleanupProgress(completed: completed, total: total, current: title))
+            completed += 1
+            return size(url)
+        }
+        // Empty locations (e.g. DerivedData without Xcode in use) have nothing to offer.
+        let safe = safeTargets.map { location, url in
+            CleanupEntry(url: url, title: location.title, note: location.note, size: measure(url, as: location.title))
+        }.filter { $0.size > 0 }
+        let others = otherURLs.map { url in
+            CleanupEntry(url: url, title: url.lastPathComponent, note: nil, size: measure(url, as: url.lastPathComponent))
+        }.filter { $0.size >= othersMinimum }
         return CleanupReport(
             safe: safe.sorted(by: bySize),
             others: Array(others.sorted(by: bySize).prefix(othersLimit)),
@@ -99,13 +124,25 @@ enum CleanupScan {
 final class CleanupModel: ObservableObject {
     @Published private(set) var report: CleanupReport?
     @Published private(set) var isScanning = false
+    /// Nil until the scan has listed what it will walk.
+    @Published private(set) var progress: CleanupProgress?
 
     func scan() {
         guard !isScanning else { return }
         isScanning = true
         let home = FileManager.default.homeDirectoryForCurrentUser
+        // Only the latest position matters; older ones are dropped if the main thread is behind.
+        let (updates, continuation) = AsyncStream.makeStream(of: CleanupProgress.self, bufferingPolicy: .bufferingNewest(1))
+        let work = Task.detached(priority: .userInitiated) {
+            defer { continuation.finish() }
+            return CleanupScan.run(home: home, progress: { continuation.yield($0) })
+        }
         Task {
-            report = await Task.detached(priority: .userInitiated) { CleanupScan.run(home: home) }.value
+            for await update in updates {
+                progress = update
+            }
+            report = await work.value
+            progress = nil
             isScanning = false
         }
     }

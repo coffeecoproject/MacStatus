@@ -65,6 +65,22 @@ struct CleanupScanTests {
         #expect(report.others.isEmpty)
     }
 
+    @Test func progressCountsEveryWalkedDirectoryInOrder() throws {
+        let home = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        for directory in [".npm/_cacache", "Library/Caches/pnpm", "Library/Caches/layermap", "Library/Caches/empty"] {
+            try FileManager.default.createDirectory(at: home.appending(path: directory), withIntermediateDirectories: true)
+        }
+        var updates: [CleanupProgress] = []
+        _ = CleanupScan.run(home: home, size: { _ in 0 }, progress: { updates.append($0) })
+
+        #expect(updates.map(\.completed) == [0, 1, 2, 3])
+        #expect(updates.allSatisfy { $0.total == 4 })
+        // Safe locations first, by their titles; then other caches by directory name.
+        #expect(Array(updates.prefix(2)).map(\.current) == ["npm 下载缓存", "pnpm 缓存"])
+        #expect(Set(updates.suffix(2).map(\.current)) == ["layermap", "empty"])
+    }
+
     @Test func missingCachesDirectoryGivesAnEmptyReport() throws {
         let report = try scan(directories: [], sizes: [:])
         #expect(report.safe.isEmpty)
