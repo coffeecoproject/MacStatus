@@ -13,6 +13,8 @@ struct MetricCard<Content: View>: View {
     let value: String
     var caption: String?
     var badge: MetricBadge?
+    /// Recent history, drawn in the header next to the value to keep the card short.
+    var trend: Sparkline?
     @ViewBuilder let content: Content
 
     var body: some View {
@@ -41,6 +43,9 @@ struct MetricCard<Content: View>: View {
                         .background(Capsule().fill(badge.color.opacity(0.15)))
                 }
                 Spacer(minLength: 8)
+                if let trend {
+                    trend.frame(width: 64)
+                }
                 Text(value)
                     .font(.system(size: 22, weight: .semibold, design: .rounded))
                     .monospacedDigit()
@@ -66,7 +71,6 @@ struct Sparkline: View {
 
     let series: [Series]
     let domain: ClosedRange<Double>
-    var height: CGFloat = 34
 
     var body: some View {
         let end = series.compactMap { $0.points.last?.time }.max() ?? Date()
@@ -103,7 +107,7 @@ struct Sparkline: View {
         .chartXAxis(.hidden)
         .chartYAxis(.hidden)
         .chartLegend(.hidden)
-        .frame(height: height)
+        .frame(height: 26)
         .accessibilityHidden(true)
     }
 
@@ -123,6 +127,7 @@ struct SegmentedBar: View {
     }
 
     let segments: [Segment]
+    var height: CGFloat = 6
 
     var body: some View {
         GeometryReader { geometry in
@@ -135,7 +140,7 @@ struct SegmentedBar: View {
                 Spacer(minLength: 0)
             }
         }
-        .frame(height: 6)
+        .frame(height: height)
         .background(Color.primary.opacity(0.08))
         .clipShape(Capsule())
         .accessibilityHidden(true)

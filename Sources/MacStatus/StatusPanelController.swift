@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 @MainActor
@@ -6,6 +7,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     private static let cornerRadius: CGFloat = 12
 
     private let monitor: SystemMonitor
+    private let model = PanelModel()
     private let hosting: NSHostingController<StatusPanelView>
     private let panel = MetricsPanel(
         contentRect: .zero,
@@ -17,11 +19,16 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     private var observedAnchorWindow: NSWindow?
     private var localMouseMonitor: Any?
     private var globalMouseMonitor: Any?
+    private var pageSubscription: AnyCancellable?
 
     init(monitor: SystemMonitor) {
         self.monitor = monitor
-        hosting = NSHostingController(rootView: StatusPanelView(monitor: monitor))
+        hosting = NSHostingController(rootView: StatusPanelView(monitor: monitor, model: model))
         super.init()
+        // `$page` publishes before the view updates; measure on the next main-queue turn.
+        pageSubscription = model.$page.dropFirst().receive(on: DispatchQueue.main).sink { [weak self] _ in
+            self?.pageChanged()
+        }
 
         // Measure before presentation; SwiftUI must not resize/reposition the window afterward.
         hosting.sizingOptions = []
@@ -64,19 +71,34 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
             return
         }
         panel.makeKeyAndOrderFront(nil)
-        monitor.setPanelVisible(panel.isVisible)
+        monitor.setPanelDemand(panel.isVisible ? demand : .hidden)
     }
 
     func hide() {
         stopObservingDismissal()
         panel.orderOut(nil)
         anchorButton = nil
-        monitor.setPanelVisible(false)
+        monitor.setPanelDemand(.hidden)
     }
 
     func invalidate() {
+        pageSubscription?.cancel()
         hide()
         panel.close()
+    }
+
+    private var demand: PanelDemand {
+        switch model.page {
+        case .overview: .metrics
+        case .processes: .processes
+        }
+    }
+
+    private func pageChanged() {
+        guard panel.isVisible else { return }
+        monitor.setPanelDemand(demand)
+        // Pages differ in height; keep the top edge under the menu bar.
+        if !positionPanel() { hide() }
     }
 
     func windowDidResignKey(_ notification: Notification) {

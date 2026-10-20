@@ -1,7 +1,7 @@
 import MacSystemMetrics
 import SwiftUI
 
-private func unavailableBadge<Value>(_ state: MetricState<Value>) -> MetricBadge? {
+func unavailableBadge<Value>(_ state: MetricState<Value>) -> MetricBadge? {
     guard case .unavailable = state else { return nil }
     return MetricBadge(text: "不可用", color: .secondary)
 }
@@ -15,9 +15,9 @@ struct CPUCard: View {
         MetricCard(
             title: "CPU", symbol: "cpu", tint: .blue,
             value: reading.map { Format.percent($0.total) } ?? Format.placeholder,
-            badge: unavailableBadge(state)
+            badge: unavailableBadge(state),
+            trend: Sparkline(series: [.init(id: "cpu", points: history, color: .blue)], domain: 0...1)
         ) {
-            Sparkline(series: [.init(id: "cpu", points: history, color: .blue)], domain: 0...1)
             CoreBars(cores: reading?.cores ?? [])
             DetailGrid(items: [
                 DetailItem(label: "用户", value: reading.map { Format.percent($0.user) } ?? Format.placeholder),
@@ -84,7 +84,6 @@ private struct CoreBars: View {
 
 struct MemoryCard: View {
     let state: MetricState<MemoryReading>
-    let processes: MetricState<[ProcessMemoryUsage]>
 
     private static let appColor = Color.green
     private static let wiredColor = Color.orange
@@ -97,8 +96,7 @@ struct MemoryCard: View {
             title: "内存", symbol: "memorychip", tint: .green,
             value: reading.map { Format.percent($0.usedFraction) } ?? Format.placeholder,
             caption: reading.map { "\(Format.memory($0.used)) / \(Format.memory($0.total))" },
-            badge: unavailableBadge(state)
-                ?? reading.map { .init(text: "压力 \(Format.pressure($0.pressure))", color: pressureColor($0.pressure)) }
+            badge: unavailableBadge(state) ?? reading.map(Self.pressureBadge)
         ) {
             SegmentedBar(segments: segments(reading))
             DetailGrid(items: [
@@ -112,7 +110,6 @@ struct MemoryCard: View {
                         ?? Format.placeholder
                 )
             ])
-            TopProcessList(state: processes, slots: SystemMonitor.processLimit)
         }
     }
 
@@ -131,78 +128,17 @@ struct MemoryCard: View {
         bytes.map(Format.memory) ?? Format.placeholder
     }
 
-    private func pressureColor(_ pressure: MemoryPressure?) -> Color {
+    static func pressureBadge(_ reading: MemoryReading) -> MetricBadge {
+        MetricBadge(text: "压力 \(Format.pressure(reading.pressure))", color: pressureColor(reading.pressure))
+    }
+
+    private static func pressureColor(_ pressure: MemoryPressure?) -> Color {
         switch pressure {
         case .normal: .green
         case .warning: .orange
         case .critical: .red
         case nil: .secondary
         }
-    }
-}
-
-/// Fixed number of rows, so the panel height measured on open does not change as data arrives.
-private struct TopProcessList: View {
-    let state: MetricState<[ProcessMemoryUsage]>
-    let slots: Int
-
-    var body: some View {
-        let usages = state.value ?? []
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Text("占用最多")
-                Spacer()
-                Text(isUnavailable ? "不可用" : "含压缩与交换，仅当前用户")
-            }
-            .font(.system(size: 10))
-            .foregroundStyle(.secondary)
-            ForEach(0..<slots, id: \.self) { index in
-                row(index < usages.count ? usages[index] : nil)
-            }
-        }
-        .padding(.top, 2)
-    }
-
-    private var isUnavailable: Bool {
-        if case .unavailable = state { return true }
-        return false
-    }
-
-    private func row(_ usage: ProcessMemoryUsage?) -> some View {
-        HStack(spacing: 4) {
-            Text(usage?.name ?? Format.placeholder)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .foregroundStyle(usage == nil ? .secondary : .primary)
-            if let usage, usage.processCount > 1 {
-                Text("\(usage.processCount) 个进程")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                    .fixedSize()
-            }
-            Spacer(minLength: 8)
-            Text(usage.map { Format.memory($0.footprint) } ?? Format.placeholder)
-                .monospacedDigit()
-                .foregroundStyle(usage == nil ? .secondary : .primary)
-                .fixedSize()
-            quitButton(usage)
-        }
-        .font(.system(size: 11))
-    }
-
-    /// Fixed-width column, so values stay aligned whether or not a row can be quit.
-    private func quitButton(_ usage: ProcessMemoryUsage?) -> some View {
-        let apps = usage?.bundlePath.map(QuittableApps.instances(in:)) ?? []
-        return ZStack {
-            if let usage, !apps.isEmpty {
-                Button("退出") { QuittableApps.quit(apps) }
-                    .buttonStyle(.borderless)
-                    .font(.system(size: 10))
-                    .help("退出 \(usage.name)，与在该 App 中选择“退出”相同")
-                    .accessibilityLabel("退出 \(usage.name)")
-            }
-        }
-        .frame(width: 26, alignment: .trailing)
     }
 }
 
@@ -220,19 +156,18 @@ struct DiskCard: View {
             title: "硬盘", symbol: "internaldrive", tint: .indigo,
             value: reading.map { Format.percent($0.usedFraction) } ?? Format.placeholder,
             caption: reading.map { $0.name.isEmpty ? Format.disk($0.total) : "\($0.name) · \(Format.disk($0.total))" },
-            badge: unavailableBadge(state)
-        ) {
-            SegmentedBar(segments: reading.map {
-                [.init(id: "used", fraction: $0.usedFraction, color: .indigo)]
-            } ?? [])
-            Sparkline(
+            badge: unavailableBadge(state),
+            trend: Sparkline(
                 series: [
                     .init(id: "read", points: readHistory, color: Self.readColor),
                     .init(id: "write", points: writeHistory, color: Self.writeColor)
                 ],
-                domain: Sparkline.domain(for: [readHistory, writeHistory], minimum: 1_000_000),
-                height: 28
+                domain: Sparkline.domain(for: [readHistory, writeHistory], minimum: 1_000_000)
             )
+        ) {
+            SegmentedBar(segments: reading.map {
+                [.init(id: "used", fraction: $0.usedFraction, color: .indigo)]
+            } ?? [])
             DetailGrid(items: [
                 DetailItem(label: "已用", value: reading.map { Format.disk($0.used) } ?? Format.placeholder),
                 DetailItem(label: "可用", value: reading.map { Format.disk($0.available) } ?? Format.placeholder),
@@ -254,12 +189,12 @@ struct TemperatureCard: View {
             value: reading?.cpu.map { Format.celsius($0.maximum) } ?? Format.placeholder,
             caption: "CPU 最高",
             badge: unavailableBadge(state)
-                ?? reading.map { .init(text: "散热 \(Format.thermal($0.thermalPressure))", color: thermalColor($0.thermalPressure)) }
-        ) {
-            Sparkline(
+                ?? reading.map { .init(text: "散热 \(Format.thermal($0.thermalPressure))", color: thermalColor($0.thermalPressure)) },
+            trend: Sparkline(
                 series: [.init(id: "temperature", points: history, color: .orange)],
                 domain: temperatureDomain
             )
+        ) {
             DetailGrid(items: [
                 DetailItem(label: "CPU 平均", value: celsius(reading?.cpu?.average)),
                 DetailItem(label: "GPU", value: celsius(reading?.gpu?.maximum)),

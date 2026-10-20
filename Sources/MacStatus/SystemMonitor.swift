@@ -18,7 +18,7 @@ struct MonitorSnapshot: Equatable {
     var memory: MetricState<MemoryReading> = .loading
     var disk: MetricState<DiskReading> = .loading
     var temperature: MetricState<TemperatureReading> = .loading
-    /// Read only while the panel is visible.
+    /// Read only while the process page is open.
     var processes: MetricState<[ProcessMemoryUsage]> = .loading
     var history = MetricHistory()
     var updatedAt: Date?
@@ -60,6 +60,13 @@ private actor TemperatureSampler {
     }
 }
 
+/// What the panel currently shows; drives the sampling interval and whether processes are read.
+enum PanelDemand: Equatable {
+    case hidden
+    case metrics
+    case processes
+}
+
 @MainActor
 final class SystemMonitor: ObservableObject {
     static let expandedInterval: Duration = .seconds(1)
@@ -67,7 +74,7 @@ final class SystemMonitor: ObservableObject {
     /// Spacing used right after a CPU baseline and when the panel asks for fresh data.
     static let minimumSpacing: Duration = .milliseconds(500)
     static let temperatureTimeout: Duration = .seconds(3)
-    static let processLimit = 5
+    static let processLimit = 10
 
     @Published private(set) var snapshot = MonitorSnapshot()
     private(set) var interval = SystemMonitor.collapsedInterval
@@ -78,7 +85,7 @@ final class SystemMonitor: ObservableObject {
     private var sleeper: Task<Void, Never>?
     private var lastTick: ContinuousClock.Instant?
     private var hurry = false
-    private var panelVisible = false
+    private var demand = PanelDemand.hidden
     private var temperatureStartedAt: ContinuousClock.Instant?
 
     func start() {
@@ -100,12 +107,14 @@ final class SystemMonitor: ObservableObject {
         sleeper?.cancel()
     }
 
-    func setPanelVisible(_ visible: Bool) {
-        interval = visible ? Self.expandedInterval : Self.collapsedInterval
-        hurry = visible
-        panelVisible = visible
-        // A list read before the panel closed must not reappear as current on the next open.
-        if !visible { snapshot.processes = .loading }
+    func setPanelDemand(_ demand: PanelDemand) {
+        guard demand != self.demand else { return }
+        self.demand = demand
+        interval = demand == .hidden ? Self.collapsedInterval : Self.expandedInterval
+        // Whatever the panel just started showing gets fresh data right away.
+        hurry = demand != .hidden
+        // A list read for an earlier view must not reappear as current.
+        if demand != .processes { snapshot.processes = .loading }
         sleeper?.cancel()
     }
 
@@ -114,7 +123,7 @@ final class SystemMonitor: ObservableObject {
         hurry = false
         startTemperatureReadIfIdle()
 
-        let result = await core.read(processLimit: panelVisible ? Self.processLimit : nil)
+        let result = await core.read(processLimit: demand == .processes ? Self.processLimit : nil)
         guard !Task.isCancelled else { return }
         let now = Date()
         var next = snapshot
@@ -144,8 +153,8 @@ final class SystemMonitor: ObservableObject {
         case .failure:
             next.disk = .unavailable
         }
-        // A list read while the panel was closing is dropped; setPanelVisible(false) already reset it.
-        if panelVisible, let processes = result.processes {
+        // A list read while the process page was closing is dropped; setPanelDemand already reset it.
+        if demand == .processes, let processes = result.processes {
             switch processes {
             case .success(let usages): next.processes = .ready(usages)
             case .failure: next.processes = .unavailable

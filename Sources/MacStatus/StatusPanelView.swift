@@ -1,20 +1,43 @@
 import AppKit
 import SwiftUI
 
+enum PanelPage: Hashable {
+    case overview
+    case processes
+}
+
+/// Panel UI state the controller observes to resize the panel and tell the monitor what to sample.
+@MainActor
+final class PanelModel: ObservableObject {
+    @Published var page = PanelPage.overview
+}
+
 struct StatusPanelView: View {
     @ObservedObject var monitor: SystemMonitor
+    @ObservedObject var model: PanelModel
 
     var body: some View {
         let snapshot = monitor.snapshot
         VStack(spacing: 8) {
-            CPUCard(state: snapshot.cpu, history: snapshot.history.cpu)
-            TemperatureCard(state: snapshot.temperature, history: snapshot.history.temperature)
-            MemoryCard(state: snapshot.memory, processes: snapshot.processes)
-            DiskCard(
-                state: snapshot.disk,
-                readHistory: snapshot.history.diskRead,
-                writeHistory: snapshot.history.diskWrite
-            )
+            Picker("页面", selection: $model.page) {
+                Text("概览").tag(PanelPage.overview)
+                Text("进程").tag(PanelPage.processes)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            switch model.page {
+            case .overview:
+                CPUCard(state: snapshot.cpu, history: snapshot.history.cpu)
+                TemperatureCard(state: snapshot.temperature, history: snapshot.history.temperature)
+                MemoryCard(state: snapshot.memory)
+                DiskCard(
+                    state: snapshot.disk,
+                    readHistory: snapshot.history.diskRead,
+                    writeHistory: snapshot.history.diskWrite
+                )
+            case .processes:
+                ProcessPage(memory: snapshot.memory, processes: snapshot.processes)
+            }
             footer(updatedAt: snapshot.updatedAt)
         }
         .padding(10)
@@ -29,7 +52,7 @@ struct StatusPanelView: View {
                     .monospacedDigit()
             }
             Spacer()
-            Button("退出") { NSApp.terminate(nil) }
+            Button("退出 MacStatus") { NSApp.terminate(nil) }
                 .buttonStyle(.borderless)
         }
         .font(.system(size: 11))
