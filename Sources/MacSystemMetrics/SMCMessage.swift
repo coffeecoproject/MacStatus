@@ -1,44 +1,52 @@
-import MacStatusCore
-
 // Undocumented AppleSMC wire layout. Explicit offsets avoid Swift struct ABI assumptions.
 struct SMCMessage {
-    enum ReadCommand: UInt8 {
+    enum Command: UInt8 {
+        case readBytes = 5
+        case keyAtIndex = 8
         case keyInfo = 9
-        case bytes = 5
     }
 
     static let byteCount = 80
+    static let floatType: UInt32 = 0x666C7420 // "flt "
+
     var bytes = [UInt8](repeating: 0, count: SMCMessage.byteCount)
 
     init() {}
 
-    init(key: String, command: ReadCommand, dataSize: UInt32 = 0) {
-        precondition(key.utf8.count == 4)
-        let code = key.utf8.reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
-        store(code, at: 0)
+    init(command: Command, key: String? = nil, dataSize: UInt32 = 0, index: UInt32 = 0) {
+        if let key { store(Self.code(key), at: 0) }
         store(dataSize, at: 28)
         bytes[42] = command.rawValue
+        store(index, at: 44)
     }
 
+    static func code(_ key: String) -> UInt32 {
+        precondition(key.utf8.count == 4)
+        return key.utf8.reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
+    }
+
+    static func key(_ code: UInt32) -> String {
+        String(decoding: [24, 16, 8, 0].map { UInt8(truncatingIfNeeded: code >> $0) }, as: UTF8.self)
+    }
+
+    var keyCode: UInt32 { word(at: 0) }
     var dataSize: UInt32 { word(at: 28) }
+    var dataType: UInt32 { word(at: 32) }
 
-    func validate(reportedSize: Int, key: String) throws(TemperatureReadError) {
-        guard reportedSize == Self.byteCount, bytes.count == Self.byteCount else {
-            throw .invalidResponse
-        }
-        guard bytes[40] == 0 else {
-            throw .sensorFailure(key: key, code: bytes[40])
-        }
-    }
-
-    func requireFloat(key: String) throws(TemperatureReadError) {
-        guard dataSize == 4, word(at: 32) == 0x666C7420 /* flt */ else {
-            throw .unsupportedFormat(key: key)
-        }
-    }
-
-    var celsius: Double {
+    var float: Double {
         Double(Float(bitPattern: word(at: 48)))
+    }
+
+    /// SMC integer payloads ("ui32") are big-endian.
+    var bigEndianWord: UInt32 {
+        bytes[48..<52].reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
+    }
+
+    func validate(reportedSize: Int) throws(MetricError) {
+        guard reportedSize == Self.byteCount, bytes.count == Self.byteCount else {
+            throw .invalidData
+        }
+        guard bytes[40] == 0 else { throw .systemFailure(code: Int32(bytes[40])) }
     }
 
     private func word(at offset: Int) -> UInt32 {

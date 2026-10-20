@@ -8,23 +8,18 @@ let package = Package(
         .executable(name: "MacStatus", targets: ["MacStatus"])
     ],
     targets: [
-        .target(name: "MacStatusCore"),
-        .target(name: "MacSystemMetrics", dependencies: ["MacStatusCore"]),
+        .target(name: "MacSystemMetrics"),
         .executableTarget(
             name: "MacStatus",
-            dependencies: ["MacStatusCore", "MacSystemMetrics"]
-        ),
-        .testTarget(
-            name: "MacStatusCoreTests",
-            dependencies: ["MacStatusCore"]
+            dependencies: ["MacSystemMetrics"]
         ),
         .testTarget(
             name: "MacSystemMetricsTests",
-            dependencies: ["MacSystemMetrics", "MacStatusCore"]
+            dependencies: ["MacSystemMetrics"]
         ),
         .testTarget(
             name: "MacStatusTests",
-            dependencies: ["MacStatus", "MacStatusCore"]
+            dependencies: ["MacStatus", "MacSystemMetrics"]
         )
     ]
 )

@@ -1,5 +1,4 @@
 import AppKit
-import MacSystemMetrics
 
 @main
 @MainActor
@@ -17,12 +16,7 @@ enum MacStatusApp {
 
 @MainActor
 private final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let monitor = SystemMonitor(
-        cpuCollector: MachCPUCollector(),
-        memoryCollector: MachMemoryCollector(),
-        diskCollector: StartupDiskCollector(),
-        temperatureCollector: SMCTemperatureCollector()
-    )
+    private let monitor = SystemMonitor()
     private var menuBar: MenuBarController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {

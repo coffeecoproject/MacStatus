@@ -3,6 +3,8 @@ import SwiftUI
 
 @MainActor
 final class StatusPanelController: NSObject, NSWindowDelegate {
+    private static let cornerRadius: CGFloat = 12
+
     private let monitor: SystemMonitor
     private let hosting: NSHostingController<StatusPanelView>
     private let panel = MetricsPanel(
@@ -23,7 +25,20 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
 
         // Measure before presentation; SwiftUI must not resize/reposition the window afterward.
         hosting.sizingOptions = []
-        panel.contentViewController = hosting
+        let background = NSVisualEffectView()
+        background.material = .popover
+        background.blendingMode = .behindWindow
+        background.state = .active
+        background.maskImage = .roundedMask(radius: Self.cornerRadius)
+        hosting.view.translatesAutoresizingMaskIntoConstraints = false
+        background.addSubview(hosting.view)
+        NSLayoutConstraint.activate([
+            hosting.view.leadingAnchor.constraint(equalTo: background.leadingAnchor),
+            hosting.view.trailingAnchor.constraint(equalTo: background.trailingAnchor),
+            hosting.view.topAnchor.constraint(equalTo: background.topAnchor),
+            hosting.view.bottomAnchor.constraint(equalTo: background.bottomAnchor)
+        ])
+        panel.contentView = background
         panel.delegate = self
         panel.title = "MacStatus 指标面板"
         panel.setAccessibilityIdentifier("MacStatusMetricsPanel")
@@ -94,6 +109,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         )
         panel.setFrame(frame, display: panel.isVisible)
         hosting.view.layoutSubtreeIfNeeded()
+        panel.invalidateShadow()
         return true
     }
 
@@ -166,6 +182,21 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
 
     @objc private func anchorMoved(_ notification: Notification) {
         if panel.isVisible, !positionPanel() { hide() }
+    }
+}
+
+private extension NSImage {
+    /// Stretchable mask that rounds a visual effect view's corners, shadow included.
+    static func roundedMask(radius: CGFloat) -> NSImage {
+        let edge = radius * 2 + 1
+        let image = NSImage(size: NSSize(width: edge, height: edge), flipped: false) { rect in
+            NSColor.black.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+            return true
+        }
+        image.capInsets = NSEdgeInsets(top: radius, left: radius, bottom: radius, right: radius)
+        image.resizingMode = .stretch
+        return image
     }
 }
 

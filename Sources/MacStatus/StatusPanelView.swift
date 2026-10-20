@@ -1,35 +1,39 @@
+import AppKit
 import SwiftUI
 
 struct StatusPanelView: View {
     @ObservedObject var monitor: SystemMonitor
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            CPUSectionView(status: monitor.snapshot.cpu)
-            TemperatureRowView(status: monitor.snapshot.temperature)
-            separator
-            MemorySectionView(status: monitor.snapshot.memory)
-            separator
-            DiskSectionView(status: monitor.snapshot.disk)
+        let snapshot = monitor.snapshot
+        VStack(spacing: 8) {
+            CPUCard(state: snapshot.cpu, history: snapshot.history.cpu)
+            TemperatureCard(state: snapshot.temperature, history: snapshot.history.temperature)
+            MemoryCard(state: snapshot.memory)
+            DiskCard(
+                state: snapshot.disk,
+                readHistory: snapshot.history.diskRead,
+                writeHistory: snapshot.history.diskWrite
+            )
+            footer(updatedAt: snapshot.updatedAt)
         }
-        .padding(16)
-        .frame(width: 280)
-        .foregroundStyle(PanelStyle.primaryText)
-        .background(PanelStyle.background)
-        .clipShape(RoundedRectangle(cornerRadius: PanelStyle.cornerRadius, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: PanelStyle.cornerRadius, style: .continuous)
-                .strokeBorder(PanelStyle.secondaryText.opacity(0.2), lineWidth: 1)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-        }
-        .preferredColorScheme(.dark)
+        .padding(10)
+        .frame(width: 340)
+        .animation(.easeOut(duration: 0.25), value: snapshot)
     }
 
-    private var separator: some View {
-        Rectangle()
-            .fill(PanelStyle.secondaryText.opacity(0.2))
-            .frame(height: 1)
-            .accessibilityHidden(true)
+    private func footer(updatedAt: Date?) -> some View {
+        HStack {
+            if let updatedAt {
+                Text("更新于 \(updatedAt.formatted(.dateTime.hour().minute().second()))")
+                    .monospacedDigit()
+            }
+            Spacer()
+            Button("退出") { NSApp.terminate(nil) }
+                .buttonStyle(.borderless)
+        }
+        .font(.system(size: 11))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 4)
     }
 }

@@ -1,169 +1,174 @@
 import Combine
-import MacStatusCore
+import Foundation
+import MacSystemMetrics
 
-@MainActor
-final class SystemMonitor: ObservableObject {
-    @Published private(set) var snapshot = SystemSnapshot()
+enum MetricState<Value: Equatable>: Equatable {
+    case loading
+    case ready(Value)
+    case unavailable
 
-    private let cpu: MetricSampler<CPUUsage?, CPUReadError>
-    private let memory: MetricSampler<MemoryUsage, MemoryReadError>
-    private let disk: MetricSampler<DiskUsage, DiskReadError>
-    private let temperature: MetricSampler<CPUTemperature, TemperatureReadError>
-    private let policy: SamplingPolicy
-    private var isRunning = false
+    var value: Value? {
+        guard case .ready(let value) = self else { return nil }
+        return value
+    }
+}
 
-    init(
-        cpuCollector: any CPUSampling,
-        memoryCollector: any MemorySampling,
-        diskCollector: any DiskSampling = MissingDiskCollector(),
-        temperatureCollector: any TemperatureSampling,
-        policy: SamplingPolicy = SamplingPolicy()
+struct MonitorSnapshot: Equatable {
+    var cpu: MetricState<CPUReading> = .loading
+    var memory: MetricState<MemoryReading> = .loading
+    var disk: MetricState<DiskReading> = .loading
+    var temperature: MetricState<TemperatureReading> = .loading
+    var history = MetricHistory()
+    var updatedAt: Date?
+}
+
+/// CPU, memory and disk are cheap kernel counters read together each tick.
+private actor CoreSampler {
+    private let cpu = CPUReader()
+    private let memory = MemoryReader()
+    private let disk = DiskReader()
+
+    func reset() {
+        cpu.reset()
+        disk.reset()
+    }
+
+    func read() -> (
+        cpu: Result<CPUReading?, MetricError>,
+        memory: Result<MemoryReading, MetricError>,
+        disk: Result<DiskReading, MetricError>
     ) {
-        self.policy = policy
-        cpu = MetricSampler(
-            policy: policy, timeoutError: .timedOut, staleError: .staleReading,
-            isBaseline: { $0 == nil }
-        ) { reset in
-            if reset { await cpuCollector.reset() }
-            do throws(CPUReadError) {
-                return .success(try await cpuCollector.sample())
-            } catch {
-                return .failure(error)
-            }
-        }
-        memory = MetricSampler(
-            policy: policy, timeoutError: .timedOut, staleError: .staleReading
-        ) { _ in
-            do throws(MemoryReadError) {
-                return .success(try await memoryCollector.sample())
-            } catch {
-                return .failure(error)
-            }
-        }
-        disk = MetricSampler(
-            policy: policy, timeoutError: .timedOut, staleError: .staleReading
-        ) { _ in
-            do throws(DiskReadError) {
-                return .success(try await diskCollector.sample())
-            } catch {
-                return .failure(error)
-            }
-        }
-        temperature = MetricSampler(
-            policy: policy, timeoutError: .timedOut, staleError: .staleReading
-        ) { _ in
-            do throws(TemperatureReadError) {
-                return .success(try await temperatureCollector.sample())
-            } catch {
-                return .failure(error)
-            }
-        }
-        cpu.onResult = { [weak self] in self?.acceptCPU($0) }
-        memory.onResult = { [weak self] in self?.acceptMemory($0) }
-        disk.onResult = { [weak self] in self?.acceptDisk($0) }
-        temperature.onResult = { [weak self] in self?.acceptTemperature($0) }
-    }
-
-    func start() {
-        guard !isRunning else { return }
-        isRunning = true
-        snapshot = SystemSnapshot(
-            cpu: .collecting(lastReading: snapshot.cpu.lastReading),
-            memory: .collecting(lastReading: snapshot.memory.lastReading),
-            disk: .collecting(lastReading: snapshot.disk.lastReading),
-            temperature: .collecting(lastReading: snapshot.temperature.lastReading)
-        )
-        guard isRunning else { return }
-        cpu.start()
-        memory.start()
-        disk.start()
-        temperature.start()
-    }
-
-    func pause() {
-        guard isRunning else { return }
-        isRunning = false
-        cpu.pause()
-        memory.pause()
-        disk.pause()
-        temperature.pause()
-        snapshot = SystemSnapshot(
-            cpu: .paused(lastReading: snapshot.cpu.lastReading),
-            memory: .paused(lastReading: snapshot.memory.lastReading),
-            disk: .paused(lastReading: snapshot.disk.lastReading),
-            temperature: .paused(lastReading: snapshot.temperature.lastReading)
-        )
-    }
-
-    func setPanelVisible(_ visible: Bool) {
-        let interval = visible ? policy.expandedInterval : policy.collapsedInterval
-        cpu.interval = interval
-        memory.interval = interval
-        disk.interval = interval
-        temperature.interval = interval
-    }
-
-    private func acceptCPU(_ result: Result<CPUUsage?, CPUReadError>) {
-        let status: CPUStatus
-        switch result {
-        case .success(let reading?):
-            status = .ready(reading)
-        case .success(nil):
-            status = .collecting(lastReading: snapshot.cpu.lastReading)
-        case .failure(let error):
-            status = .unavailable(error: error, lastReading: snapshot.cpu.lastReading)
-        }
-        snapshot = SystemSnapshot(
-            cpu: status, memory: snapshot.memory, disk: snapshot.disk,
-            temperature: snapshot.temperature
-        )
-    }
-
-    private func acceptMemory(_ result: Result<MemoryUsage, MemoryReadError>) {
-        let status: MemoryStatus
-        switch result {
-        case .success(let reading):
-            status = .ready(reading)
-        case .failure(let error):
-            status = .unavailable(error: error, lastReading: snapshot.memory.lastReading)
-        }
-        snapshot = SystemSnapshot(
-            cpu: snapshot.cpu, memory: status, disk: snapshot.disk,
-            temperature: snapshot.temperature
-        )
-    }
-
-    private func acceptDisk(_ result: Result<DiskUsage, DiskReadError>) {
-        let status: DiskStatus
-        switch result {
-        case .success(let reading):
-            status = .ready(reading)
-        case .failure(let error):
-            status = .unavailable(error: error, lastReading: snapshot.disk.lastReading)
-        }
-        snapshot = SystemSnapshot(
-            cpu: snapshot.cpu, memory: snapshot.memory, disk: status,
-            temperature: snapshot.temperature
-        )
-    }
-
-    private func acceptTemperature(_ result: Result<CPUTemperature, TemperatureReadError>) {
-        let status: TemperatureStatus
-        switch result {
-        case .success(let reading):
-            status = .ready(reading)
-        case .failure(let error):
-            status = .unavailable(error: error, lastReading: snapshot.temperature.lastReading)
-        }
-        snapshot = SystemSnapshot(
-            cpu: snapshot.cpu, memory: snapshot.memory, disk: snapshot.disk,
-            temperature: status
+        (
+            Result { () throws(MetricError) in try cpu.read() },
+            Result { () throws(MetricError) in try memory.read() },
+            Result { () throws(MetricError) in try disk.read() }
         )
     }
 }
 
-private actor MissingDiskCollector: DiskSampling {
-    func sample() throws(DiskReadError) -> DiskUsage {
-        throw .unavailable
+/// SMC goes through an undocumented driver interface, so it runs apart from the core tick.
+private actor TemperatureSampler {
+    private let reader = TemperatureReader()
+
+    func read() -> Result<TemperatureReading, MetricError> {
+        Result { () throws(MetricError) in try reader.read() }
+    }
+}
+
+@MainActor
+final class SystemMonitor: ObservableObject {
+    static let expandedInterval: Duration = .seconds(1)
+    static let collapsedInterval: Duration = .seconds(2)
+    /// Spacing used right after a CPU baseline and when the panel asks for fresh data.
+    static let minimumSpacing: Duration = .milliseconds(500)
+    static let temperatureTimeout: Duration = .seconds(3)
+
+    @Published private(set) var snapshot = MonitorSnapshot()
+    private(set) var interval = SystemMonitor.collapsedInterval
+
+    private let core = CoreSampler()
+    private let thermal = TemperatureSampler()
+    private var loop: Task<Void, Never>?
+    private var sleeper: Task<Void, Never>?
+    private var lastTick: ContinuousClock.Instant?
+    private var hurry = false
+    private var temperatureStartedAt: ContinuousClock.Instant?
+
+    func start() {
+        guard loop == nil else { return }
+        snapshot.cpu = .loading
+        loop = Task {
+            // Deltas must not span a pause or sleep.
+            await core.reset()
+            while !Task.isCancelled {
+                await tick()
+                await waitForNextTick()
+            }
+        }
+    }
+
+    func pause() {
+        loop?.cancel()
+        loop = nil
+        sleeper?.cancel()
+    }
+
+    func setPanelVisible(_ visible: Bool) {
+        interval = visible ? Self.expandedInterval : Self.collapsedInterval
+        hurry = visible
+        sleeper?.cancel()
+    }
+
+    private func tick() async {
+        lastTick = .now
+        hurry = false
+        startTemperatureReadIfIdle()
+
+        let result = await core.read()
+        guard !Task.isCancelled else { return }
+        let now = Date()
+        var next = snapshot
+        switch result.cpu {
+        case .success(let reading?):
+            next.cpu = .ready(reading)
+            next.history.append(reading.total, to: .cpu, at: now)
+        case .success(nil):
+            next.cpu = .loading
+            hurry = true
+        case .failure:
+            next.cpu = .unavailable
+        }
+        switch result.memory {
+        case .success(let reading):
+            next.memory = .ready(reading)
+        case .failure:
+            next.memory = .unavailable
+        }
+        switch result.disk {
+        case .success(let reading):
+            next.disk = .ready(reading)
+            if let read = reading.readRate, let write = reading.writeRate {
+                next.history.append(read, to: .diskRead, at: now)
+                next.history.append(write, to: .diskWrite, at: now)
+            }
+        case .failure:
+            next.disk = .unavailable
+        }
+        if let started = temperatureStartedAt, started.duration(to: .now) > Self.temperatureTimeout {
+            next.temperature = .unavailable
+        }
+        next.updatedAt = now
+        snapshot = next
+    }
+
+    private func startTemperatureReadIfIdle() {
+        // At most one SMC call in flight; a hung call only blocks temperature.
+        guard temperatureStartedAt == nil else { return }
+        temperatureStartedAt = .now
+        Task {
+            let result = await thermal.read()
+            temperatureStartedAt = nil
+            switch result {
+            case .success(let reading):
+                snapshot.temperature = .ready(reading)
+                if let cpu = reading.cpu {
+                    snapshot.history.append(cpu.maximum, to: .temperature, at: Date())
+                }
+            case .failure:
+                snapshot.temperature = .unavailable
+            }
+        }
+    }
+
+    private func waitForNextTick() async {
+        // Re-evaluated after each wake-up so interval changes apply to the current wait.
+        while !Task.isCancelled, let lastTick {
+            let deadline = lastTick.advanced(by: hurry ? Self.minimumSpacing : interval)
+            guard ContinuousClock.now < deadline else { return }
+            let sleeper = Task { _ = try? await Task.sleep(until: deadline, clock: .continuous) }
+            self.sleeper = sleeper
+            await sleeper.value
+            self.sleeper = nil
+        }
     }
 }
