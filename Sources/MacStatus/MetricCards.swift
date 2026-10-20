@@ -185,8 +185,24 @@ private struct TopProcessList: View {
                 .monospacedDigit()
                 .foregroundStyle(usage == nil ? .secondary : .primary)
                 .fixedSize()
+            quitButton(usage)
         }
         .font(.system(size: 11))
+    }
+
+    /// Fixed-width column, so values stay aligned whether or not a row can be quit.
+    private func quitButton(_ usage: ProcessMemoryUsage?) -> some View {
+        let apps = usage?.bundlePath.map(QuittableApps.instances(in:)) ?? []
+        return ZStack {
+            if let usage, !apps.isEmpty {
+                Button("退出") { QuittableApps.quit(apps) }
+                    .buttonStyle(.borderless)
+                    .font(.system(size: 10))
+                    .help("退出 \(usage.name)，与在该 App 中选择“退出”相同")
+                    .accessibilityLabel("退出 \(usage.name)")
+            }
+        }
+        .frame(width: 26, alignment: .trailing)
     }
 }
 
