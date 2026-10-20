@@ -188,3 +188,57 @@ struct DetailGrid: View {
         .frame(maxWidth: .infinity)
     }
 }
+
+/// A titled group of rows in a card with a note below, as in a grouped list; set apart from the card above
+/// so the title reads as belonging to its rows.
+struct ListSection<Rows: View, Footer: View>: View {
+    let title: String
+    @ViewBuilder let rows: Rows
+    @ViewBuilder let footer: Footer
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+            ListCard { rows }
+            VStack(alignment: .leading, spacing: 2) { footer }
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+        }
+        .padding(.top, 6)
+    }
+}
+
+/// Rows on a card background; row highlights follow its rounded corners.
+struct ListCard<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(spacing: 0) { content }
+            .background(Color.primary.opacity(0.05))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+/// Separator between list rows, inset to the row text.
+struct RowDivider: View {
+    var body: some View {
+        Divider().padding(.leading, 10)
+    }
+}
+
+/// A list row's text when there are no rows to show.
+struct ListPlaceholder: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+    }
+}

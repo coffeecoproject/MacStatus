@@ -29,27 +29,21 @@ private actor CoreSampler {
     private let cpu = CPUReader()
     private let memory = MemoryReader()
     private let disk = DiskReader()
-    private let apps = AppMemoryReader()
 
     func reset() {
         cpu.reset()
         disk.reset()
     }
 
-    /// `apps` are the bundles to list, or nil to skip the app list.
-    func read(apps bundles: Set<String>?) -> (
+    func read() -> (
         cpu: Result<CPUReading?, MetricError>,
         memory: Result<MemoryReading, MetricError>,
-        disk: Result<DiskReading, MetricError>,
-        apps: Result<[AppMemoryUsage], MetricError>?
+        disk: Result<DiskReading, MetricError>
     ) {
         (
             Result { () throws(MetricError) in try cpu.read() },
             Result { () throws(MetricError) in try memory.read() },
-            Result { () throws(MetricError) in try disk.read() },
-            bundles.map { bundles in
-                Result { () throws(MetricError) in try apps.read(apps: bundles, limit: SystemMonitor.appLimit) }
-            }
+            Result { () throws(MetricError) in try disk.read() }
         )
     }
 }
@@ -77,13 +71,15 @@ final class SystemMonitor: ObservableObject {
     /// Spacing used right after a CPU baseline and when the panel asks for fresh data.
     static let minimumSpacing: Duration = .milliseconds(500)
     static let temperatureTimeout: Duration = .seconds(3)
-    nonisolated static let appLimit = 10
+    static let appLimit = 10
 
     @Published private(set) var snapshot = MonitorSnapshot()
     private(set) var interval = SystemMonitor.collapsedInterval
 
     private let core = CoreSampler()
     private let thermal = TemperatureSampler()
+    /// Read on the main actor (a few milliseconds), so the list is ready in the same update that opens the page.
+    private let apps = AppMemoryReader()
     private var loop: Task<Void, Never>?
     private var sleeper: Task<Void, Never>?
     private var lastTick: ContinuousClock.Instant?
@@ -117,7 +113,7 @@ final class SystemMonitor: ObservableObject {
         // Whatever the panel just started showing gets fresh data right away.
         hurry = demand != .hidden
         // A list read for an earlier view must not reappear as current.
-        if demand != .processes { snapshot.apps = .loading }
+        snapshot.apps = demand == .processes ? readApps() : .loading
         sleeper?.cancel()
     }
 
@@ -126,7 +122,7 @@ final class SystemMonitor: ObservableObject {
         hurry = false
         startTemperatureReadIfIdle()
 
-        let result = await core.read(apps: demand == .processes ? QuittableApps.bundlePaths() : nil)
+        let result = await core.read()
         guard !Task.isCancelled else { return }
         let now = Date()
         var next = snapshot
@@ -156,18 +152,22 @@ final class SystemMonitor: ObservableObject {
         case .failure:
             next.disk = .unavailable
         }
-        // A list read while the process page was closing is dropped; setPanelDemand already reset it.
-        if demand == .processes, let apps = result.apps {
-            switch apps {
-            case .success(let usages): next.apps = .ready(usages)
-            case .failure: next.apps = .unavailable
-            }
+        if demand == .processes {
+            next.apps = readApps()
         }
         if let started = temperatureStartedAt, started.duration(to: .now) > Self.temperatureTimeout {
             next.temperature = .unavailable
         }
         next.updatedAt = now
         snapshot = next
+    }
+
+    private func readApps() -> MetricState<[AppMemoryUsage]> {
+        do {
+            return .ready(try apps.read(apps: QuittableApps.bundlePaths(), limit: Self.appLimit))
+        } catch {
+            return .unavailable
+        }
     }
 
     private func startTemperatureReadIfIdle() {

@@ -14,11 +14,12 @@ struct CleanupPage: View {
         let report = cleanup.report
         summary(report)
         if let report {
-            section("开发工具缓存") {
+            ListSection(title: "开发工具缓存") {
                 if report.safe.isEmpty {
-                    placeholder("没有发现可清理的工具缓存")
+                    ListPlaceholder(text: "没有发现可清理的工具缓存")
                 }
-                rows(report.safe) { entry in
+                ForEach(report.safe) { entry in
+                    if entry.id != report.safe.first?.id { RowDivider() }
                     CleanupRow(entry: entry, busy: cleanup.isScanning, moveToTrash: entry.location.map { location in
                         { cleanup.moveToTrash(location) }
                     })
@@ -29,7 +30,7 @@ struct CleanupPage: View {
                 }
                 Text("移到废纸篓后可恢复；清空废纸篓才释放空间。")
             }
-            othersSection(report.others)
+            others(report.others)
         }
     }
 
@@ -57,80 +58,47 @@ struct CleanupPage: View {
         .onAppear { cleanup.scanIfNeeded() }
     }
 
-    private func othersSection(_ others: [CleanupEntry]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+    /// A folded card whose header row opens it.
+    private func others(_ others: [CleanupEntry]) -> some View {
+        ListCard {
             Button {
                 showsOthers.toggle()
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
                         .rotationEffect(.degrees(showsOthers ? 90 : 0))
-                    Text("其他大缓存").font(.system(size: 11, weight: .semibold))
-                    Text("由各 App 管理，仅供参考").font(.system(size: 10))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("其他大缓存").font(.system(size: 12, weight: .medium))
+                        Text("由各 App 管理，仅供参考")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
                     Spacer()
                     Text(Format.disk(others.reduce(0) { $0 + $1.size }))
-                        .font(.system(size: 11))
+                        .font(.system(size: 12))
                         .monospacedDigit()
+                        .foregroundStyle(.secondary)
                 }
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 4)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel(showsOthers ? "收起其他大缓存" : "展开其他大缓存")
             if showsOthers {
-                card {
-                    if others.isEmpty {
-                        placeholder("没有超过 \(Format.disk(CleanupScan.othersMinimum)) 的")
-                    }
-                    rows(others) { CleanupRow(entry: $0, busy: cleanup.isScanning, moveToTrash: nil) }
+                if others.isEmpty {
+                    RowDivider()
+                    ListPlaceholder(text: "没有超过 \(Format.disk(CleanupScan.othersMinimum)) 的")
+                }
+                ForEach(others) { entry in
+                    RowDivider()
+                    CleanupRow(entry: entry, busy: cleanup.isScanning, moveToTrash: nil)
                 }
             }
         }
-    }
-
-    private func section(
-        _ title: String,
-        @ViewBuilder rows: () -> some View,
-        @ViewBuilder footer: () -> some View
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 4)
-            card(rows)
-            VStack(alignment: .leading, spacing: 2, content: footer)
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 4)
-        }
-    }
-
-    private func card(@ViewBuilder _ content: () -> some View) -> some View {
-        VStack(spacing: 0, content: content)
-            .background(Color.primary.opacity(0.05))
-            // Row highlights follow the rounded corners.
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-
-    /// Rows separated by inset dividers, as in a grouped list.
-    private func rows(_ entries: [CleanupEntry], @ViewBuilder row: @escaping (CleanupEntry) -> some View) -> some View {
-        ForEach(entries) { entry in
-            if entry.id != entries.first?.id {
-                Divider().padding(.leading, 10)
-            }
-            row(entry)
-        }
-    }
-
-    private func placeholder(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 11))
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
+        .padding(.top, 6)
     }
 }
 

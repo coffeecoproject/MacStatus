@@ -5,6 +5,7 @@ import SwiftUI
 @MainActor
 final class StatusPanelController: NSObject, NSWindowDelegate {
     private static let cornerRadius: CGFloat = 12
+    private static let resizeDuration: TimeInterval = 0.2
 
     private let monitor: SystemMonitor
     private let model = PanelModel()
@@ -21,6 +22,8 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     private var localMouseMonitor: Any?
     private var globalMouseMonitor: Any?
     private var subscriptions: [AnyCancellable] = []
+    /// Where the panel is placed or animating to; `panel.frame` is in between while animating.
+    private var targetFrame: NSRect?
 
     init(monitor: SystemMonitor) {
         self.monitor = monitor
@@ -37,8 +40,9 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
             }
         ]
 
-        // The controller sizes and places the panel; SwiftUI must not resize/reposition the window.
-        hosting.sizingOptions = []
+        // The controller sizes and places the panel; SwiftUI only sizes its own view, which is pinned to the
+        // top so that content changing ahead of the panel's resize stays in place instead of shifting.
+        hosting.sizingOptions = [.intrinsicContentSize]
         let background = NSVisualEffectView()
         background.material = .popover
         background.blendingMode = .behindWindow
@@ -49,8 +53,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         NSLayoutConstraint.activate([
             hosting.view.leadingAnchor.constraint(equalTo: background.leadingAnchor),
             hosting.view.trailingAnchor.constraint(equalTo: background.trailingAnchor),
-            hosting.view.topAnchor.constraint(equalTo: background.topAnchor),
-            hosting.view.bottomAnchor.constraint(equalTo: background.bottomAnchor)
+            hosting.view.topAnchor.constraint(equalTo: background.topAnchor)
         ])
         panel.contentView = background
         panel.delegate = self
@@ -73,18 +76,20 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
             return
         }
         anchorButton = button
+        // Before measuring, so data read for the page (the app list) is part of the first size.
+        monitor.setPanelDemand(Self.demand(for: model.page))
         guard positionPanel(), startObservingDismissal() else {
             hide()
             return
         }
         panel.makeKeyAndOrderFront(nil)
-        monitor.setPanelDemand(panel.isVisible ? Self.demand(for: model.page) : .hidden)
     }
 
     func hide() {
         stopObservingDismissal()
         panel.orderOut(nil)
         anchorButton = nil
+        targetFrame = nil
         monitor.setPanelDemand(.hidden)
     }
 
@@ -129,6 +134,9 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
               let screen = NSScreen.screens.first(where: {
                   $0.frame.contains(NSPoint(x: anchor.midX, y: anchor.midY))
               }) else { return false }
+        // Applies pending state first (e.g. the app list read just before opening); otherwise the
+        // measurement is of the previous content.
+        hosting.view.layoutSubtreeIfNeeded()
         let size = hosting.sizeThatFits(in: screen.visibleFrame.size)
         guard size.width.isFinite, size.height.isFinite,
               size.width > 0, size.height > 0 else { return false }
@@ -139,10 +147,20 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
             visibleFrame: screen.visibleFrame,
             menuBarHeight: max(NSStatusBar.system.thickness, screen.safeAreaInsets.top)
         )
-        guard frame != panel.frame else { return true }
-        panel.setFrame(frame, display: panel.isVisible)
-        hosting.view.layoutSubtreeIfNeeded()
-        panel.invalidateShadow()
+        guard frame != targetFrame else { return true }
+        targetFrame = frame
+        guard panel.isVisible else {
+            panel.setFrame(frame, display: false)
+            return true
+        }
+        // The top edge stays under the menu bar; the bottom edge follows the content.
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Self.resizeDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.animator().setFrame(frame, display: true)
+        } completionHandler: { [panel] in
+            MainActor.assumeIsolated { panel.invalidateShadow() }
+        }
         return true
     }
 
