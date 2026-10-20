@@ -53,6 +53,9 @@ enum CleanupScan {
     ]
 
     static let othersDirectory = "Library/Caches"
+    /// Apple's own caches are left out of other caches: some hold protected data (e.g. the media library
+    /// under com.apple.Music), and reading them makes the system ask the user for permission.
+    static let applePrefix = "com.apple."
     static let othersMinimum: UInt64 = 100_000_000
     static let othersLimit = 8
 
@@ -70,7 +73,9 @@ enum CleanupScan {
         }
         let cachesURL = home.appending(path: othersDirectory)
         let children = (try? FileManager.default.contentsOfDirectory(at: cachesURL, includingPropertiesForKeys: nil)) ?? []
-        let otherURLs = children.map(\.standardizedFileURL).filter { !safeURLs.contains($0) && isDirectory($0) }
+        let otherURLs = children.map(\.standardizedFileURL).filter {
+            !$0.lastPathComponent.hasPrefix(applePrefix) && !safeURLs.contains($0) && isDirectory($0)
+        }
 
         // Everything to walk is listed first, so progress has a fixed total.
         let total = safeTargets.count + otherURLs.count

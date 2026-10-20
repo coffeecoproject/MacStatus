@@ -45,6 +45,21 @@ struct CleanupScanTests {
         #expect(report.others.allSatisfy { $0.note == nil })
     }
 
+    @Test func appleCachesAreNeverWalked() throws {
+        let home = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        for directory in ["Library/Caches/com.apple.Music", "Library/Caches/com.apple.iTunes", "Library/Caches/layermap"] {
+            try FileManager.default.createDirectory(at: home.appending(path: directory), withIntermediateDirectories: true)
+        }
+        var walked: [String] = []
+        let report = CleanupScan.run(home: home) { url in
+            walked.append(url.lastPathComponent)
+            return 500 * Self.megabyte
+        }
+        #expect(walked == ["layermap"])
+        #expect(report.others.map(\.title) == ["layermap"])
+    }
+
     @Test func otherCachesAreCappedAtTheLimit() throws {
         let names = (0..<(CleanupScan.othersLimit + 3)).map { "cache\($0)" }
         let report = try scan(
