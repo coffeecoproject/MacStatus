@@ -26,16 +26,12 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         self.monitor = monitor
         hosting = NSHostingController(rootView: StatusPanelView(monitor: monitor, model: model, cleanup: cleanup))
         super.init()
-        // `@Published` fires before the view updates; measure on the next main-queue turn.
         subscriptions = [
-            model.$page.dropFirst().receive(on: DispatchQueue.main).sink { [weak self] _ in
+            model.$page.dropFirst().sink { [weak self] _ in
                 self?.pageChanged()
             },
-            // Content height follows the data (rows, captions), so refit after each update.
-            monitor.$snapshot.receive(on: DispatchQueue.main).sink { [weak self] _ in
-                self?.fitContent()
-            },
-            cleanup.objectWillChange.receive(on: DispatchQueue.main).sink { [weak self] _ in
+            // Reported during layout; refit on the next main-queue turn, outside it.
+            model.$contentHeight.removeDuplicates().dropFirst().receive(on: DispatchQueue.main).sink { [weak self] _ in
                 self?.fitContent()
             }
         ]
@@ -107,7 +103,6 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     private func pageChanged() {
         guard panel.isVisible else { return }
         monitor.setPanelDemand(demand)
-        fitContent()
     }
 
     /// Keeps the top edge under the menu bar as the content height changes.

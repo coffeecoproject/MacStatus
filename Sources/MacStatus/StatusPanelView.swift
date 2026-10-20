@@ -11,6 +11,8 @@ enum PanelPage: Hashable {
 @MainActor
 final class PanelModel: ObservableObject {
     @Published var page = PanelPage.overview
+    /// Laid-out height of the content, whatever changed it (data, page, a section folding).
+    @Published var contentHeight: CGFloat = 0
 }
 
 struct StatusPanelView: View {
@@ -48,6 +50,9 @@ struct StatusPanelView: View {
         .padding(10)
         .frame(width: 340)
         .animation(.easeOut(duration: 0.25), value: snapshot)
+        // Always laid out at its ideal height, so the height reported is the one the panel needs.
+        .fixedSize(horizontal: false, vertical: true)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { model.contentHeight = $0 }
     }
 
     private func footer(updatedAt: Date?) -> some View {
