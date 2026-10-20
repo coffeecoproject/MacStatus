@@ -144,13 +144,12 @@ final class SystemMonitor: ObservableObject {
         case .failure:
             next.disk = .unavailable
         }
-        switch result.processes {
-        case .success(let usages)?:
-            next.processes = panelVisible ? .ready(usages) : .loading
-        case .failure?:
-            next.processes = .unavailable
-        case nil:
-            break
+        // A list read while the panel was closing is dropped; setPanelVisible(false) already reset it.
+        if panelVisible, let processes = result.processes {
+            switch processes {
+            case .success(let usages): next.processes = .ready(usages)
+            case .failure: next.processes = .unavailable
+            }
         }
         if let started = temperatureStartedAt, started.duration(to: .now) > Self.temperatureTimeout {
             next.temperature = .unavailable

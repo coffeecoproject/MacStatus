@@ -50,7 +50,7 @@ enum ProcessMemoryAggregator {
 
 /// Reads the current user's processes; other users' and root processes need privileges and are skipped.
 public final class ProcessMemoryReader {
-    private var displayNames: [String: String] = [:]
+    private var appNames: [String: String] = [:]
 
     public init() {}
 
@@ -58,17 +58,21 @@ public final class ProcessMemoryReader {
         ProcessMemoryAggregator.top(try Self.samples(), limit: limit).map { usage in
             guard let bundle = usage.bundlePath else { return usage }
             var named = usage
-            named.name = displayName(bundle)
+            named.name = appName(bundle, fallback: usage.name)
             return named
         }
     }
 
-    /// Localized app name (e.g. "微信" for WeChat.app), cached because it reads the bundle.
-    private func displayName(_ bundle: String) -> String {
-        if let cached = displayNames[bundle] { return cached }
-        var name = FileManager.default.displayName(atPath: bundle)
-        if name.hasSuffix(".app") { name.removeLast(4) }
-        displayNames[bundle] = name
+    /// The name the app declares for itself, localized for the system language, as Activity Monitor
+    /// shows it (e.g. "Claude Code" for claude.app). Cached because it reads the bundle's Info.plist.
+    private func appName(_ bundle: String, fallback: String) -> String {
+        if let cached = appNames[bundle] { return cached }
+        // `object(forInfoDictionaryKey:)` prefers the localized value when the bundle has one.
+        let info = Bundle(path: bundle)
+        let name = ["CFBundleDisplayName", "CFBundleName"].lazy
+            .compactMap { info?.object(forInfoDictionaryKey: $0) as? String }
+            .first { !$0.isEmpty } ?? fallback
+        appNames[bundle] = name
         return name
     }
 
@@ -79,10 +83,11 @@ public final class ProcessMemoryReader {
         var pids = [pid_t](repeating: 0, count: Int(capacity) + 64)
         let count = pids.withUnsafeMutableBytes { proc_listallpids($0.baseAddress, Int32($0.count)) }
         guard count > 0 else { throw .systemFailure(code: errno) }
-        return pids.prefix(Int(count)).compactMap(sample(pid:))
+        var pathBuffer = [UInt8](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        return pids.prefix(Int(count)).compactMap { sample(pid: $0, pathBuffer: &pathBuffer) }
     }
 
-    private static func sample(pid: pid_t) -> ProcessSample? {
+    private static func sample(pid: pid_t, pathBuffer buffer: inout [UInt8]) -> ProcessSample? {
         guard pid > 0 else { return nil }
         var info = rusage_info_v4()
         let result = withUnsafeMutablePointer(to: &info) {
@@ -92,7 +97,6 @@ public final class ProcessMemoryReader {
         }
         guard result == 0 else { return nil }
 
-        var buffer = [UInt8](repeating: 0, count: 4 * Int(MAXPATHLEN))
         let length = proc_pidpath(pid, &buffer, UInt32(buffer.count))
         let path = length > 0 ? String(decoding: buffer.prefix(Int(length)), as: UTF8.self) : nil
         let name: String

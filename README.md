@@ -46,7 +46,7 @@ bash Scripts/build-dmg.sh
 
 - **CPU**：`host_processor_info` 每核 `(user + nice + system) / total`；核心类型来自 IORegistry 的 `cluster-type`。
 - **内存**：与活动监视器一致，已用 = App（匿名页 − 可清除页）+ 联动 + 压缩；缓存 = 文件缓存页 + 可清除页。内存显示用二进制单位，硬盘用十进制单位（与访达一致）。
-- **进程内存**：`proc_pid_rusage` 的物理占用（含压缩与已换出的页，同活动监视器“内存”列）。辅助进程按可执行文件所在的最外层 `.app` 并入所属 App；不在 App 包内的进程各自单列。无需管理员权限，因此只含当前用户的进程，root 与其他用户的进程（如 WindowServer）不在列表中。
+- **进程内存**：`proc_pid_rusage` 的物理占用（含压缩与已换出的页，同活动监视器“内存”列）。辅助进程按可执行文件所在的最外层 `.app` 并入所属 App，名称取 App 在 Info.plist 中声明的名称（同活动监视器）；不在 App 包内的进程各自单列。无需管理员权限，因此只含当前用户的进程，root 与其他用户的进程（如 WindowServer）不在列表中。
 - **硬盘读写**：所有块存储设备 `IOBlockStorageDriver` 统计之和。
 - **温度**：启动时枚举 SMC 键，`Tp*`/`Te*` 归为 CPU，`Tg*` 归为 GPU，`TH0x` 为固态硬盘，`TB0T` 为电池；只接受 `flt` 类型，读数不在 0–150°C 之间的传感器跳过。这些键没有苹果公开的兼容性承诺，macOS 或机型变化可能导致分组失效。
 
