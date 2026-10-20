@@ -10,6 +10,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     private let monitor: SystemMonitor
     private let model = PanelModel()
     private let cleanup = CleanupModel()
+    private let ai = AIModel()
     private let hosting: NSHostingController<StatusPanelView>
     private let panel = MetricsPanel(
         contentRect: .zero,
@@ -27,7 +28,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
 
     init(monitor: SystemMonitor) {
         self.monitor = monitor
-        hosting = NSHostingController(rootView: StatusPanelView(monitor: monitor, model: model, cleanup: cleanup))
+        hosting = NSHostingController(rootView: StatusPanelView(monitor: monitor, model: model, cleanup: cleanup, ai: ai))
         super.init()
         subscriptions = [
             // Fires before `model.page` changes, so the new page is taken from the value sent.
@@ -76,8 +77,8 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
             return
         }
         anchorButton = button
-        // Before measuring, so data read for the page (the app list) is part of the first size.
-        monitor.setPanelDemand(Self.demand(for: model.page))
+        // Before measuring, so data read for the page (the app list, sessions) is part of the first size.
+        startReading(for: model.page)
         guard positionPanel(), startObservingDismissal() else {
             hide()
             return
@@ -91,6 +92,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         anchorButton = nil
         targetFrame = nil
         monitor.setPanelDemand(.hidden)
+        ai.setActive(false)
     }
 
     func invalidate() {
@@ -99,16 +101,15 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         panel.close()
     }
 
-    private static func demand(for page: PanelPage) -> PanelDemand {
-        switch page {
-        case .overview, .cleanup: .metrics
-        case .processes: .processes
-        }
+    /// What the open panel reads follows the page it shows.
+    private func startReading(for page: PanelPage) {
+        monitor.setPanelDemand(page == .processes ? .processes : .metrics)
+        ai.setActive(page == .ai)
     }
 
     private func pageChanged(to page: PanelPage) {
         guard panel.isVisible else { return }
-        monitor.setPanelDemand(Self.demand(for: page))
+        startReading(for: page)
     }
 
     /// Keeps the top edge under the menu bar as the content height changes.

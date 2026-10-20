@@ -78,28 +78,15 @@ public final class AppMemoryReader {
     }
 
     private static func samples() throws(MetricError) -> [ProcessSample] {
-        let capacity = proc_listallpids(nil, 0)
-        guard capacity > 0 else { throw .systemFailure(code: errno) }
-        // Slack for processes started between the two calls.
-        var pids = [pid_t](repeating: 0, count: Int(capacity) + 64)
-        let count = pids.withUnsafeMutableBytes { proc_listallpids($0.baseAddress, Int32($0.count)) }
-        guard count > 0 else { throw .systemFailure(code: errno) }
         var pathBuffer = [UInt8](repeating: 0, count: 4 * Int(MAXPATHLEN))
-        return pids.prefix(Int(count)).compactMap { sample(pid: $0, pathBuffer: &pathBuffer) }
+        return try ProcessList.pids().compactMap { sample(pid: $0, pathBuffer: &pathBuffer) }
     }
 
     private static func sample(pid: pid_t, pathBuffer buffer: inout [UInt8]) -> ProcessSample? {
-        guard pid > 0 else { return nil }
-        var info = rusage_info_v4()
-        let result = withUnsafeMutablePointer(to: &info) {
-            $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) {
-                proc_pid_rusage(pid, RUSAGE_INFO_V4, $0)
-            }
-        }
-        guard result == 0 else { return nil }
+        guard let footprint = ProcessList.footprint(pid: pid) else { return nil }
         let length = proc_pidpath(pid, &buffer, UInt32(buffer.count))
         guard length > 0 else { return nil }
         let path = String(decoding: buffer.prefix(Int(length)), as: UTF8.self)
-        return ProcessSample(path: path, footprint: info.ri_phys_footprint)
+        return ProcessSample(path: path, footprint: footprint)
     }
 }

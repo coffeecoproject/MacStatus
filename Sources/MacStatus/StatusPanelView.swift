@@ -5,6 +5,7 @@ enum PanelPage: Hashable {
     case overview
     case processes
     case cleanup
+    case ai
 }
 
 /// Panel UI state the controller observes to resize the panel and tell the monitor what to sample.
@@ -19,6 +20,7 @@ struct StatusPanelView: View {
     @ObservedObject var monitor: SystemMonitor
     @ObservedObject var model: PanelModel
     let cleanup: CleanupModel
+    let ai: AIModel
 
     var body: some View {
         let snapshot = monitor.snapshot
@@ -27,6 +29,7 @@ struct StatusPanelView: View {
                 Text("概览").tag(PanelPage.overview)
                 Text("进程").tag(PanelPage.processes)
                 Text("清理").tag(PanelPage.cleanup)
+                Text("AI").tag(PanelPage.ai)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -44,6 +47,8 @@ struct StatusPanelView: View {
                 ProcessPage(memory: snapshot.memory, apps: snapshot.apps)
             case .cleanup:
                 CleanupPage(disk: snapshot.disk, cleanup: cleanup)
+            case .ai:
+                AIPage(ai: ai)
             }
             footer(updatedAt: snapshot.updatedAt)
         }
