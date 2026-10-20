@@ -19,7 +19,7 @@ struct MonitorSnapshot: Equatable {
     var disk: MetricState<DiskReading> = .loading
     var temperature: MetricState<TemperatureReading> = .loading
     /// Read only while the process page is open.
-    var processes: MetricState<[ProcessMemoryUsage]> = .loading
+    var apps: MetricState<[AppMemoryUsage]> = .loading
     var history = MetricHistory()
     var updatedAt: Date?
 }
@@ -29,24 +29,27 @@ private actor CoreSampler {
     private let cpu = CPUReader()
     private let memory = MemoryReader()
     private let disk = DiskReader()
-    private let processes = ProcessMemoryReader()
+    private let apps = AppMemoryReader()
 
     func reset() {
         cpu.reset()
         disk.reset()
     }
 
-    func read(processLimit: Int?) -> (
+    /// `apps` are the bundles to list, or nil to skip the app list.
+    func read(apps bundles: Set<String>?) -> (
         cpu: Result<CPUReading?, MetricError>,
         memory: Result<MemoryReading, MetricError>,
         disk: Result<DiskReading, MetricError>,
-        processes: Result<[ProcessMemoryUsage], MetricError>?
+        apps: Result<[AppMemoryUsage], MetricError>?
     ) {
         (
             Result { () throws(MetricError) in try cpu.read() },
             Result { () throws(MetricError) in try memory.read() },
             Result { () throws(MetricError) in try disk.read() },
-            processLimit.map { limit in Result { () throws(MetricError) in try processes.read(limit: limit) } }
+            bundles.map { bundles in
+                Result { () throws(MetricError) in try apps.read(apps: bundles, limit: SystemMonitor.appLimit) }
+            }
         )
     }
 }
@@ -60,7 +63,7 @@ private actor TemperatureSampler {
     }
 }
 
-/// What the panel currently shows; drives the sampling interval and whether processes are read.
+/// What the panel currently shows; drives the sampling interval and whether the app list is read.
 enum PanelDemand: Equatable {
     case hidden
     case metrics
@@ -74,7 +77,7 @@ final class SystemMonitor: ObservableObject {
     /// Spacing used right after a CPU baseline and when the panel asks for fresh data.
     static let minimumSpacing: Duration = .milliseconds(500)
     static let temperatureTimeout: Duration = .seconds(3)
-    static let processLimit = 10
+    nonisolated static let appLimit = 10
 
     @Published private(set) var snapshot = MonitorSnapshot()
     private(set) var interval = SystemMonitor.collapsedInterval
@@ -114,7 +117,7 @@ final class SystemMonitor: ObservableObject {
         // Whatever the panel just started showing gets fresh data right away.
         hurry = demand != .hidden
         // A list read for an earlier view must not reappear as current.
-        if demand != .processes { snapshot.processes = .loading }
+        if demand != .processes { snapshot.apps = .loading }
         sleeper?.cancel()
     }
 
@@ -123,7 +126,7 @@ final class SystemMonitor: ObservableObject {
         hurry = false
         startTemperatureReadIfIdle()
 
-        let result = await core.read(processLimit: demand == .processes ? Self.processLimit : nil)
+        let result = await core.read(apps: demand == .processes ? QuittableApps.bundlePaths() : nil)
         guard !Task.isCancelled else { return }
         let now = Date()
         var next = snapshot
@@ -154,10 +157,10 @@ final class SystemMonitor: ObservableObject {
             next.disk = .unavailable
         }
         // A list read while the process page was closing is dropped; setPanelDemand already reset it.
-        if demand == .processes, let processes = result.processes {
-            switch processes {
-            case .success(let usages): next.processes = .ready(usages)
-            case .failure: next.processes = .unavailable
+        if demand == .processes, let apps = result.apps {
+            switch apps {
+            case .success(let usages): next.apps = .ready(usages)
+            case .failure: next.apps = .unavailable
             }
         }
         if let started = temperatureStartedAt, started.duration(to: .now) > Self.temperatureTimeout {

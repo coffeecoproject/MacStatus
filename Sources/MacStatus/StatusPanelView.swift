@@ -36,7 +36,7 @@ struct StatusPanelView: View {
                     writeHistory: snapshot.history.diskWrite
                 )
             case .processes:
-                ProcessPage(memory: snapshot.memory, processes: snapshot.processes)
+                ProcessPage(memory: snapshot.memory, apps: snapshot.apps)
             }
             footer(updatedAt: snapshot.updatedAt)
         }

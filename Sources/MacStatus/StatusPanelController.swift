@@ -19,18 +19,24 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     private var observedAnchorWindow: NSWindow?
     private var localMouseMonitor: Any?
     private var globalMouseMonitor: Any?
-    private var pageSubscription: AnyCancellable?
+    private var subscriptions: [AnyCancellable] = []
 
     init(monitor: SystemMonitor) {
         self.monitor = monitor
         hosting = NSHostingController(rootView: StatusPanelView(monitor: monitor, model: model))
         super.init()
-        // `$page` publishes before the view updates; measure on the next main-queue turn.
-        pageSubscription = model.$page.dropFirst().receive(on: DispatchQueue.main).sink { [weak self] _ in
-            self?.pageChanged()
-        }
+        // `@Published` fires before the view updates; measure on the next main-queue turn.
+        subscriptions = [
+            model.$page.dropFirst().receive(on: DispatchQueue.main).sink { [weak self] _ in
+                self?.pageChanged()
+            },
+            // Content height follows the data (rows, captions), so refit after each update.
+            monitor.$snapshot.receive(on: DispatchQueue.main).sink { [weak self] _ in
+                self?.fitContent()
+            }
+        ]
 
-        // Measure before presentation; SwiftUI must not resize/reposition the window afterward.
+        // The controller sizes and places the panel; SwiftUI must not resize/reposition the window.
         hosting.sizingOptions = []
         let background = NSVisualEffectView()
         background.material = .popover
@@ -82,7 +88,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     }
 
     func invalidate() {
-        pageSubscription?.cancel()
+        subscriptions.removeAll()
         hide()
         panel.close()
     }
@@ -97,8 +103,12 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     private func pageChanged() {
         guard panel.isVisible else { return }
         monitor.setPanelDemand(demand)
-        // Pages differ in height; keep the top edge under the menu bar.
-        if !positionPanel() { hide() }
+        fitContent()
+    }
+
+    /// Keeps the top edge under the menu bar as the content height changes.
+    private func fitContent() {
+        if panel.isVisible, !positionPanel() { hide() }
     }
 
     func windowDidResignKey(_ notification: Notification) {
@@ -129,6 +139,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
             visibleFrame: screen.visibleFrame,
             menuBarHeight: max(NSStatusBar.system.thickness, screen.safeAreaInsets.top)
         )
+        guard frame != panel.frame else { return true }
         panel.setFrame(frame, display: panel.isVisible)
         hosting.view.layoutSubtreeIfNeeded()
         panel.invalidateShadow()
@@ -203,7 +214,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     }
 
     @objc private func anchorMoved(_ notification: Notification) {
-        if panel.isVisible, !positionPanel() { hide() }
+        fitContent()
     }
 }
 

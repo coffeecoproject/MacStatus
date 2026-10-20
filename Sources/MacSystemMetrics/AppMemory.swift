@@ -1,70 +1,71 @@
 import Darwin
 import Foundation
 
-/// Memory used by one app (its helpers included) or by one standalone process.
-public struct ProcessMemoryUsage: Sendable, Equatable, Identifiable {
-    /// The app bundle path, or "pid:<n>" for a process outside any app bundle.
-    public let id: String
+/// Memory used by one app, its helper processes included.
+public struct AppMemoryUsage: Sendable, Equatable, Identifiable {
+    /// The outermost app bundle; helper apps nested in it count toward it.
+    public let bundlePath: String
     public internal(set) var name: String
-    public let bundlePath: String?
     public let processCount: Int
     /// Physical footprint, including compressed and swapped-out pages, like Activity Monitor's "Memory".
     public let footprint: UInt64
-}
 
-struct ProcessSample: Sendable, Equatable {
-    let pid: pid_t
-    let name: String
-    let path: String?
-    let footprint: UInt64
-}
+    public var id: String { bundlePath }
 
-enum ProcessMemoryAggregator {
-    /// The outermost `.app` bundle containing the executable, so helper apps count toward their host app.
-    static func bundlePath(forExecutable path: String) -> String? {
+    /// The outermost `.app` bundle at or above `path`, which may be an executable or a bundle itself
+    /// (Docker.app/Contents/MacOS/Docker Desktop.app belongs to Docker.app).
+    public static func bundlePath(containing path: String) -> String? {
+        let path = path.hasSuffix("/") ? path : path + "/"
         guard let range = path.range(of: ".app/") else { return nil }
         return String(path[..<range.lowerBound]) + ".app"
     }
+}
 
-    static func top(_ samples: [ProcessSample], limit: Int) -> [ProcessMemoryUsage] {
-        var groups: [String: ProcessMemoryUsage] = [:]
+struct ProcessSample: Sendable, Equatable {
+    let path: String
+    let footprint: UInt64
+}
+
+enum AppMemoryAggregator {
+    /// Groups processes into the given app bundles; processes outside them are left out.
+    static func top(_ samples: [ProcessSample], apps: Set<String>, limit: Int) -> [AppMemoryUsage] {
+        var groups: [String: AppMemoryUsage] = [:]
         for sample in samples {
-            let bundle = sample.path.flatMap(bundlePath(forExecutable:))
-            let id = bundle ?? "pid:\(sample.pid)"
-            let existing = groups[id]
-            groups[id] = ProcessMemoryUsage(
-                id: id,
-                name: bundle.map { URL(fileURLWithPath: $0).deletingPathExtension().lastPathComponent }
-                    ?? sample.name,
+            guard let bundle = AppMemoryUsage.bundlePath(containing: sample.path), apps.contains(bundle) else {
+                continue
+            }
+            let existing = groups[bundle]
+            groups[bundle] = AppMemoryUsage(
                 bundlePath: bundle,
+                name: URL(fileURLWithPath: bundle).deletingPathExtension().lastPathComponent,
                 processCount: (existing?.processCount ?? 0) + 1,
                 footprint: (existing?.footprint ?? 0) + sample.footprint
             )
         }
         let sorted = groups.values.sorted {
-            $0.footprint != $1.footprint ? $0.footprint > $1.footprint : $0.id < $1.id
+            $0.footprint != $1.footprint ? $0.footprint > $1.footprint : $0.bundlePath < $1.bundlePath
         }
         return Array(sorted.prefix(limit))
     }
 }
 
 /// Reads the current user's processes; other users' and root processes need privileges and are skipped.
-public final class ProcessMemoryReader {
+public final class AppMemoryReader {
     private var appNames: [String: String] = [:]
 
     public init() {}
 
-    public func read(limit: Int) throws(MetricError) -> [ProcessMemoryUsage] {
-        ProcessMemoryAggregator.top(try Self.samples(), limit: limit).map { usage in
-            guard let bundle = usage.bundlePath else { return usage }
+    /// The apps in `apps` (outermost bundle paths) using the most memory.
+    public func read(apps: Set<String>, limit: Int) throws(MetricError) -> [AppMemoryUsage] {
+        AppMemoryAggregator.top(try Self.samples(), apps: apps, limit: limit).map { usage in
             var named = usage
-            named.name = appName(bundle, fallback: usage.name)
+            named.name = appName(usage.bundlePath, fallback: usage.name)
             return named
         }
     }
 
     /// The name the app declares for itself, localized for the system language, as Activity Monitor
-    /// shows it (e.g. "Claude Code" for claude.app). Cached because it reads the bundle's Info.plist.
+    /// shows it. Cached because it reads the bundle's Info.plist.
     private func appName(_ bundle: String, fallback: String) -> String {
         if let cached = appNames[bundle] { return cached }
         // `object(forInfoDictionaryKey:)` prefers the localized value when the bundle has one.
@@ -96,17 +97,9 @@ public final class ProcessMemoryReader {
             }
         }
         guard result == 0 else { return nil }
-
         let length = proc_pidpath(pid, &buffer, UInt32(buffer.count))
-        let path = length > 0 ? String(decoding: buffer.prefix(Int(length)), as: UTF8.self) : nil
-        let name: String
-        if let path {
-            name = URL(fileURLWithPath: path).lastPathComponent
-        } else {
-            var short = [UInt8](repeating: 0, count: 64)
-            let shortLength = proc_name(pid, &short, UInt32(short.count))
-            name = shortLength > 0 ? String(decoding: short.prefix(Int(shortLength)), as: UTF8.self) : "\(pid)"
-        }
-        return ProcessSample(pid: pid, name: name, path: path, footprint: info.ri_phys_footprint)
+        guard length > 0 else { return nil }
+        let path = String(decoding: buffer.prefix(Int(length)), as: UTF8.self)
+        return ProcessSample(path: path, footprint: info.ri_phys_footprint)
     }
 }

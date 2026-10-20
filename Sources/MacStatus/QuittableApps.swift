@@ -1,28 +1,28 @@
 import AppKit
+import MacSystemMetrics
 
-/// Regular (Dock) apps behind a process-list row, which may be asked to quit normally.
-/// Menu bar apps, background agents, command-line tools and MacStatus itself are left alone.
+/// Regular apps, the ones in the Dock and the Force Quit window, which may be asked to quit normally.
+/// Menu bar apps, background agents and command-line tools are not listed.
 @MainActor
 enum QuittableApps {
-    static func instances(in bundlePath: String) -> [NSRunningApplication] {
-        let ownPID = ProcessInfo.processInfo.processIdentifier
-        return NSWorkspace.shared.runningApplications.filter { app in
-            guard app.activationPolicy == .regular, app.processIdentifier != ownPID,
-                  let url = app.bundleURL else { return false }
-            return contains(bundlePath, url.resolvingSymlinksInPath().path)
-        }
-    }
-
-    /// A row groups everything under its outermost bundle, and the regular app may be nested inside it
-    /// (Docker.app/Contents/MacOS/Docker Desktop.app).
-    nonisolated static func contains(_ bundlePath: String, _ appPath: String) -> Bool {
-        appPath == bundlePath || appPath.hasPrefix(bundlePath + "/")
+    /// Their outermost bundles, as the app list groups processes.
+    static func bundlePaths() -> Set<String> {
+        Set(running().map(\.bundle))
     }
 
     /// Same as choosing Quit in the app: it may ask to save, or decline.
-    static func quit(_ apps: [NSRunningApplication]) {
-        for app in apps {
+    static func quit(bundlePath: String) {
+        for (app, bundle) in running() where bundle == bundlePath {
             _ = app.terminate()
+        }
+    }
+
+    private static func running() -> [(app: NSRunningApplication, bundle: String)] {
+        NSWorkspace.shared.runningApplications.compactMap { app in
+            guard app.activationPolicy == .regular, let url = app.bundleURL,
+                  let bundle = AppMemoryUsage.bundlePath(containing: url.resolvingSymlinksInPath().path)
+            else { return nil }
+            return (app, bundle)
         }
     }
 }
