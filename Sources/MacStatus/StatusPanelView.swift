@@ -9,7 +9,7 @@ struct StatusPanelView: View {
         VStack(spacing: 8) {
             CPUCard(state: snapshot.cpu, history: snapshot.history.cpu)
             TemperatureCard(state: snapshot.temperature, history: snapshot.history.temperature)
-            MemoryCard(state: snapshot.memory)
+            MemoryCard(state: snapshot.memory, processes: snapshot.processes)
             DiskCard(
                 state: snapshot.disk,
                 readHistory: snapshot.history.diskRead,

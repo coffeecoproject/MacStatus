@@ -158,11 +158,12 @@ struct DetailGrid: View {
         Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
             ForEach(Array(stride(from: 0, to: items.count, by: 2)), id: \.self) { index in
                 GridRow {
-                    cell(items[index])
                     if index + 1 < items.count {
+                        cell(items[index])
                         cell(items[index + 1])
                     } else {
-                        Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
+                        // A trailing odd item spans both columns so long values (load average) are not truncated.
+                        cell(items[index]).gridCellColumns(2)
                     }
                 }
             }

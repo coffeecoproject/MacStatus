@@ -18,6 +18,8 @@ struct MonitorSnapshot: Equatable {
     var memory: MetricState<MemoryReading> = .loading
     var disk: MetricState<DiskReading> = .loading
     var temperature: MetricState<TemperatureReading> = .loading
+    /// Read only while the panel is visible.
+    var processes: MetricState<[ProcessMemoryUsage]> = .loading
     var history = MetricHistory()
     var updatedAt: Date?
 }
@@ -27,21 +29,24 @@ private actor CoreSampler {
     private let cpu = CPUReader()
     private let memory = MemoryReader()
     private let disk = DiskReader()
+    private let processes = ProcessMemoryReader()
 
     func reset() {
         cpu.reset()
         disk.reset()
     }
 
-    func read() -> (
+    func read(processLimit: Int?) -> (
         cpu: Result<CPUReading?, MetricError>,
         memory: Result<MemoryReading, MetricError>,
-        disk: Result<DiskReading, MetricError>
+        disk: Result<DiskReading, MetricError>,
+        processes: Result<[ProcessMemoryUsage], MetricError>?
     ) {
         (
             Result { () throws(MetricError) in try cpu.read() },
             Result { () throws(MetricError) in try memory.read() },
-            Result { () throws(MetricError) in try disk.read() }
+            Result { () throws(MetricError) in try disk.read() },
+            processLimit.map { limit in Result { () throws(MetricError) in try processes.read(limit: limit) } }
         )
     }
 }
@@ -62,6 +67,7 @@ final class SystemMonitor: ObservableObject {
     /// Spacing used right after a CPU baseline and when the panel asks for fresh data.
     static let minimumSpacing: Duration = .milliseconds(500)
     static let temperatureTimeout: Duration = .seconds(3)
+    static let processLimit = 5
 
     @Published private(set) var snapshot = MonitorSnapshot()
     private(set) var interval = SystemMonitor.collapsedInterval
@@ -72,6 +78,7 @@ final class SystemMonitor: ObservableObject {
     private var sleeper: Task<Void, Never>?
     private var lastTick: ContinuousClock.Instant?
     private var hurry = false
+    private var panelVisible = false
     private var temperatureStartedAt: ContinuousClock.Instant?
 
     func start() {
@@ -96,6 +103,9 @@ final class SystemMonitor: ObservableObject {
     func setPanelVisible(_ visible: Bool) {
         interval = visible ? Self.expandedInterval : Self.collapsedInterval
         hurry = visible
+        panelVisible = visible
+        // A list read before the panel closed must not reappear as current on the next open.
+        if !visible { snapshot.processes = .loading }
         sleeper?.cancel()
     }
 
@@ -104,7 +114,7 @@ final class SystemMonitor: ObservableObject {
         hurry = false
         startTemperatureReadIfIdle()
 
-        let result = await core.read()
+        let result = await core.read(processLimit: panelVisible ? Self.processLimit : nil)
         guard !Task.isCancelled else { return }
         let now = Date()
         var next = snapshot
@@ -133,6 +143,14 @@ final class SystemMonitor: ObservableObject {
             }
         case .failure:
             next.disk = .unavailable
+        }
+        switch result.processes {
+        case .success(let usages)?:
+            next.processes = panelVisible ? .ready(usages) : .loading
+        case .failure?:
+            next.processes = .unavailable
+        case nil:
+            break
         }
         if let started = temperatureStartedAt, started.duration(to: .now) > Self.temperatureTimeout {
             next.temperature = .unavailable

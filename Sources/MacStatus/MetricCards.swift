@@ -84,6 +84,7 @@ private struct CoreBars: View {
 
 struct MemoryCard: View {
     let state: MetricState<MemoryReading>
+    let processes: MetricState<[ProcessMemoryUsage]>
 
     private static let appColor = Color.green
     private static let wiredColor = Color.orange
@@ -111,6 +112,7 @@ struct MemoryCard: View {
                         ?? Format.placeholder
                 )
             ])
+            TopProcessList(state: processes, slots: SystemMonitor.processLimit)
         }
     }
 
@@ -136,6 +138,55 @@ struct MemoryCard: View {
         case .critical: .red
         case nil: .secondary
         }
+    }
+}
+
+/// Fixed number of rows, so the panel height measured on open does not change as data arrives.
+private struct TopProcessList: View {
+    let state: MetricState<[ProcessMemoryUsage]>
+    let slots: Int
+
+    var body: some View {
+        let usages = state.value ?? []
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Text("占用最多")
+                Spacer()
+                Text(isUnavailable ? "不可用" : "含压缩与交换，仅当前用户")
+            }
+            .font(.system(size: 10))
+            .foregroundStyle(.secondary)
+            ForEach(0..<slots, id: \.self) { index in
+                row(index < usages.count ? usages[index] : nil)
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    private var isUnavailable: Bool {
+        if case .unavailable = state { return true }
+        return false
+    }
+
+    private func row(_ usage: ProcessMemoryUsage?) -> some View {
+        HStack(spacing: 4) {
+            Text(usage?.name ?? Format.placeholder)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .foregroundStyle(usage == nil ? .secondary : .primary)
+            if let usage, usage.processCount > 1 {
+                Text("\(usage.processCount) 个进程")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+            }
+            Spacer(minLength: 8)
+            Text(usage.map { Format.memory($0.footprint) } ?? Format.placeholder)
+                .monospacedDigit()
+                .foregroundStyle(usage == nil ? .secondary : .primary)
+                .fixedSize()
+        }
+        .font(.system(size: 11))
     }
 }
 
