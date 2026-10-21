@@ -138,22 +138,32 @@ actor ClaudeQuota {
     /// No cache, so the response and credentials are not written to disk.
     private static let session = URLSession(configuration: .ephemeral)
 
+    private let readCredentials: @Sendable () async -> Result<Data, QuotaIssue>
+    private let requestUsage: @Sendable (ClaudeToken) async -> Result<QuotaReading, QuotaIssue>
     private var heldToken: ClaudeToken?
+
+    init(
+        readCredentials: @escaping @Sendable () async -> Result<Data, QuotaIssue> = ClaudeQuota.credentials,
+        requestUsage: @escaping @Sendable (ClaudeToken) async -> Result<QuotaReading, QuotaIssue> = ClaudeQuota.usage(with:)
+    ) {
+        self.readCredentials = readCredentials
+        self.requestUsage = requestUsage
+    }
 
     func fetch() async -> Result<QuotaReading, QuotaIssue> {
         if let heldToken, !heldToken.hasExpired(at: Date()) {
-            let result = await Self.usage(with: heldToken)
+            let result = await requestUsage(heldToken)
             // Otherwise Claude Code may have renewed its sign-in since the token was read.
             guard result == .failure(.expired) else { return result }
         }
         heldToken = nil
         let token: ClaudeToken
-        switch await Self.credentials().flatMap(Self.accessToken(fromCredentials:)) {
+        switch await readCredentials().flatMap(Self.accessToken(fromCredentials:)) {
         case .success(let value): token = value
         case .failure(let issue): return .failure(issue)
         }
         guard !token.hasExpired(at: Date()) else { return .failure(.expired) }
-        let result = await Self.usage(with: token)
+        let result = await requestUsage(token)
         if result != .failure(.expired) { heldToken = token }
         return result
     }
@@ -169,7 +179,7 @@ actor ClaudeQuota {
         ))
     }
 
-    private static func usage(with token: ClaudeToken) async -> Result<QuotaReading, QuotaIssue> {
+    static func usage(with token: ClaudeToken) async -> Result<QuotaReading, QuotaIssue> {
         var request = URLRequest(url: usageURL, timeoutInterval: 15)
         request.setValue("Bearer \(token.value)", forHTTPHeaderField: "Authorization")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
@@ -203,7 +213,7 @@ actor ClaudeQuota {
     }
 
     /// The first read shows the system's keychain prompt and blocks until it is answered, so it runs on its own queue.
-    private static func credentials() async -> Result<Data, QuotaIssue> {
+    static func credentials() async -> Result<Data, QuotaIssue> {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 continuation.resume(returning: readKeychain())

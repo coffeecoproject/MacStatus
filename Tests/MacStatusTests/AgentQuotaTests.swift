@@ -105,3 +105,94 @@ struct ClaudeQuotaTests {
         #expect(ClaudeQuota.reading(fromUsage: Data("not json".utf8), at: now) == nil)
     }
 }
+
+/// When the keychain, which may prompt, is read: only without a usable token.
+struct ClaudeQuotaTokenTests {
+    /// Answers in order, then repeats the last answer.
+    private actor Script<Answer: Sendable> {
+        private var answers: [Answer]
+        private(set) var calls: [String] = []
+
+        init(_ answers: [Answer]) { self.answers = answers }
+
+        func next(_ call: String) -> Answer {
+            calls.append(call)
+            return answers.count > 1 ? answers.removeFirst() : answers[0]
+        }
+    }
+
+    private static let reading = QuotaReading(windows: [QuotaWindow(minutes: 300, used: 0.1, resetsAt: nil)], reportedAt: Date())
+
+    private static func credentials(_ token: String, expiresIn seconds: TimeInterval = 3600) -> Data {
+        let expiresAt = Int64(Date().addingTimeInterval(seconds).timeIntervalSince1970 * 1000)
+        return Data(#"{"claudeAiOauth":{"accessToken":"\#(token)","expiresAt":\#(expiresAt)}}"#.utf8)
+    }
+
+    private static func quota(
+        keychain: Script<Result<Data, QuotaIssue>>,
+        usage: Script<Result<QuotaReading, QuotaIssue>>
+    ) -> ClaudeQuota {
+        ClaudeQuota(
+            readCredentials: { await keychain.next("read") },
+            requestUsage: { await usage.next($0.value) }
+        )
+    }
+
+    @Test func reusesTheTokenWithoutReadingTheKeychainAgain() async {
+        let keychain = Script<Result<Data, QuotaIssue>>([.success(Self.credentials("a"))])
+        let usage = Script<Result<QuotaReading, QuotaIssue>>([.success(Self.reading)])
+        let quota = Self.quota(keychain: keychain, usage: usage)
+        #expect(await quota.fetch() == .success(Self.reading))
+        #expect(await quota.fetch() == .success(Self.reading))
+        #expect(await keychain.calls == ["read"])
+        #expect(await usage.calls == ["a", "a"])
+    }
+
+    @Test func aRefusedTokenIsReadAgainFromTheKeychain() async {
+        let keychain = Script<Result<Data, QuotaIssue>>([.success(Self.credentials("a")), .success(Self.credentials("b"))])
+        let usage = Script<Result<QuotaReading, QuotaIssue>>([.success(Self.reading), .failure(.expired), .success(Self.reading)])
+        let quota = Self.quota(keychain: keychain, usage: usage)
+        _ = await quota.fetch()
+        #expect(await quota.fetch() == .success(Self.reading))
+        #expect(await keychain.calls == ["read", "read"])
+        #expect(await usage.calls == ["a", "a", "b"])
+    }
+
+    @Test func anExpiredTokenIsNeitherSentNorKept() async {
+        let keychain = Script<Result<Data, QuotaIssue>>([.success(Self.credentials("a", expiresIn: -60))])
+        let usage = Script<Result<QuotaReading, QuotaIssue>>([.success(Self.reading)])
+        let quota = Self.quota(keychain: keychain, usage: usage)
+        #expect(await quota.fetch() == .failure(.expired))
+        #expect(await quota.fetch() == .failure(.expired))
+        #expect(await keychain.calls == ["read", "read"])
+        #expect(await usage.calls.isEmpty)
+    }
+
+    @Test func aTokenTheEndpointRefusesIsNotKept() async {
+        let keychain = Script<Result<Data, QuotaIssue>>([.success(Self.credentials("a"))])
+        let usage = Script<Result<QuotaReading, QuotaIssue>>([.failure(.expired)])
+        let quota = Self.quota(keychain: keychain, usage: usage)
+        #expect(await quota.fetch() == .failure(.expired))
+        #expect(await quota.fetch() == .failure(.expired))
+        #expect(await keychain.calls == ["read", "read"])
+    }
+
+    @Test func otherFailuresKeepTheToken() async {
+        let keychain = Script<Result<Data, QuotaIssue>>([.success(Self.credentials("a"))])
+        let usage = Script<Result<QuotaReading, QuotaIssue>>([.failure(.unavailable("网络请求失败")), .success(Self.reading)])
+        let quota = Self.quota(keychain: keychain, usage: usage)
+        #expect(await quota.fetch() == .failure(.unavailable("网络请求失败")))
+        #expect(await quota.fetch() == .success(Self.reading))
+        #expect(await keychain.calls == ["read"])
+    }
+
+    @Test func aRefusedKeychainIsAskedAgainOnlyOnTheNextFetch() async {
+        let keychain = Script<Result<Data, QuotaIssue>>([.failure(.denied), .success(Self.credentials("a"))])
+        let usage = Script<Result<QuotaReading, QuotaIssue>>([.success(Self.reading)])
+        let quota = Self.quota(keychain: keychain, usage: usage)
+        #expect(await quota.fetch() == .failure(.denied))
+        #expect(await usage.calls.isEmpty)
+        #expect(await quota.fetch() == .success(Self.reading))
+        #expect(await keychain.calls == ["read", "read"])
+    }
+}
