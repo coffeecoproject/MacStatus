@@ -54,7 +54,6 @@ struct StatusPanelView: View {
         }
         .padding(10)
         .frame(width: 340)
-        .animation(.easeOut(duration: 0.25), value: snapshot)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { model.contentHeight = $0 }
     }
 

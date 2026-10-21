@@ -86,6 +86,8 @@ final class SystemMonitor: ObservableObject {
     private var hurry = false
     private var demand = PanelDemand.hidden
     private var temperatureStartedAt: ContinuousClock.Instant?
+    /// Applied by the next tick, so each tick changes the snapshot, and redraws the panel, once.
+    private var finishedTemperature: (result: Result<TemperatureReading, MetricError>, at: Date)?
 
     func start() {
         guard loop == nil else { return }
@@ -155,6 +157,18 @@ final class SystemMonitor: ObservableObject {
         if demand == .processes {
             next.apps = readApps()
         }
+        if let finished = finishedTemperature {
+            finishedTemperature = nil
+            switch finished.result {
+            case .success(let reading):
+                next.temperature = .ready(reading)
+                if let cpu = reading.cpu {
+                    next.history.append(cpu.maximum, to: .temperature, at: finished.at)
+                }
+            case .failure:
+                next.temperature = .unavailable
+            }
+        }
         if let started = temperatureStartedAt, started.duration(to: .now) > Self.temperatureTimeout {
             next.temperature = .unavailable
         }
@@ -177,24 +191,20 @@ final class SystemMonitor: ObservableObject {
         Task {
             let result = await thermal.read()
             temperatureStartedAt = nil
-            switch result {
-            case .success(let reading):
-                snapshot.temperature = .ready(reading)
-                if let cpu = reading.cpu {
-                    snapshot.history.append(cpu.maximum, to: .temperature, at: Date())
-                }
-            case .failure:
-                snapshot.temperature = .unavailable
-            }
+            finishedTemperature = (result, Date())
         }
     }
 
     private func waitForNextTick() async {
         // Re-evaluated after each wake-up so interval changes apply to the current wait.
         while !Task.isCancelled, let lastTick {
-            let deadline = lastTick.advanced(by: hurry ? Self.minimumSpacing : interval)
+            let spacing = hurry ? Self.minimumSpacing : interval
+            let deadline = lastTick.advanced(by: spacing)
             guard ContinuousClock.now < deadline else { return }
-            let sleeper = Task { _ = try? await Task.sleep(until: deadline, clock: .continuous) }
+            // The leeway lets the system wake the app together with other work.
+            let sleeper = Task {
+                _ = try? await Task.sleep(until: deadline, tolerance: spacing / 10, clock: .continuous)
+            }
             self.sleeper = sleeper
             await sleeper.value
             self.sleeper = nil

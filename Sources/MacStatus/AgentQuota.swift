@@ -117,22 +117,61 @@ enum CodexQuota {
     }
 }
 
+/// A Claude Code access token and when it stops working.
+struct ClaudeToken: Equatable, Sendable {
+    let value: String
+    /// Nil when the credentials give no expiry.
+    let expiresAt: Date?
+
+    func hasExpired(at date: Date) -> Bool {
+        expiresAt.map { $0 <= date } ?? false
+    }
+}
+
 /// Claude Code's plan limits, from the usage endpoint behind its `/usage`, signed in with Claude Code's own
 /// credentials. The token is only read, never refreshed: refreshing would replace Claude Code's sign-in.
-enum ClaudeQuota {
+/// It is kept between queries, so the keychain, which may prompt, is read again only once the token has
+/// expired or been refused.
+actor ClaudeQuota {
     static let keychainService = "Claude Code-credentials"
     static let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
     /// No cache, so the response and credentials are not written to disk.
     private static let session = URLSession(configuration: .ephemeral)
 
-    static func fetch() async -> Result<QuotaReading, QuotaIssue> {
-        let token: String
-        switch await credentials().flatMap({ accessToken(fromCredentials: $0) }) {
+    private var heldToken: ClaudeToken?
+
+    func fetch() async -> Result<QuotaReading, QuotaIssue> {
+        if let heldToken, !heldToken.hasExpired(at: Date()) {
+            let result = await Self.usage(with: heldToken)
+            // Otherwise Claude Code may have renewed its sign-in since the token was read.
+            guard result == .failure(.expired) else { return result }
+        }
+        heldToken = nil
+        let token: ClaudeToken
+        switch await Self.credentials().flatMap(Self.accessToken(fromCredentials:)) {
         case .success(let value): token = value
         case .failure(let issue): return .failure(issue)
         }
+        guard !token.hasExpired(at: Date()) else { return .failure(.expired) }
+        let result = await Self.usage(with: token)
+        if result != .failure(.expired) { heldToken = token }
+        return result
+    }
+
+    static func accessToken(fromCredentials data: Data) -> Result<ClaudeToken, QuotaIssue> {
+        guard let credentials = try? JSONDecoder().decode(Credentials.self, from: data),
+              let oauth = credentials.claudeAiOauth else {
+            return .failure(.unavailable("Claude Code 未用 Claude 账号登录"))
+        }
+        return .success(ClaudeToken(
+            value: oauth.accessToken,
+            expiresAt: oauth.expiresAt.map { Date(timeIntervalSince1970: $0 / 1000) }
+        ))
+    }
+
+    private static func usage(with token: ClaudeToken) async -> Result<QuotaReading, QuotaIssue> {
         var request = URLRequest(url: usageURL, timeoutInterval: 15)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(token.value)", forHTTPHeaderField: "Authorization")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
         do {
             let (data, response) = try await session.data(for: request)
@@ -152,18 +191,6 @@ enum ClaudeQuota {
         } catch {
             return .failure(.unavailable("网络请求失败"))
         }
-    }
-
-    /// The access token, unless it has expired; Claude Code renews it when next used.
-    static func accessToken(fromCredentials data: Data, now: Date = Date()) -> Result<String, QuotaIssue> {
-        guard let credentials = try? JSONDecoder().decode(Credentials.self, from: data),
-              let oauth = credentials.claudeAiOauth else {
-            return .failure(.unavailable("Claude Code 未用 Claude 账号登录"))
-        }
-        if let expiresAt = oauth.expiresAt, Date(timeIntervalSince1970: expiresAt / 1000) <= now {
-            return .failure(.expired)
-        }
-        return .success(oauth.accessToken)
     }
 
     /// Nil when the response has none of the known windows.

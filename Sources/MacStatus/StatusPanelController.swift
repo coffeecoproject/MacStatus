@@ -11,7 +11,10 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     private let model = PanelModel()
     private let cleanup = CleanupModel()
     private let ai = AIModel()
-    private let hosting: NSHostingController<StatusPanelView>
+    private let background = NSVisualEffectView()
+    /// Exists only while the panel is shown: a SwiftUI view left in the hidden panel would still follow every
+    /// refresh, laying out and drawing for nobody to see.
+    private var hosting: NSHostingController<StatusPanelView>?
     private let panel = MetricsPanel(
         contentRect: .zero,
         styleMask: [.borderless, .nonactivatingPanel],
@@ -28,7 +31,6 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
 
     init(monitor: SystemMonitor) {
         self.monitor = monitor
-        hosting = NSHostingController(rootView: StatusPanelView(monitor: monitor, model: model, cleanup: cleanup, ai: ai))
         super.init()
         subscriptions = [
             // Fires before `model.page` changes, so the new page is taken from the value sent.
@@ -41,21 +43,10 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
             }
         ]
 
-        // The controller sizes and places the panel; SwiftUI only sizes its own view, which is pinned to the
-        // top so that content changing ahead of the panel's resize stays in place instead of shifting.
-        hosting.sizingOptions = [.intrinsicContentSize]
-        let background = NSVisualEffectView()
         background.material = .popover
         background.blendingMode = .behindWindow
         background.state = .active
         background.maskImage = .roundedMask(radius: Self.cornerRadius)
-        hosting.view.translatesAutoresizingMaskIntoConstraints = false
-        background.addSubview(hosting.view)
-        NSLayoutConstraint.activate([
-            hosting.view.leadingAnchor.constraint(equalTo: background.leadingAnchor),
-            hosting.view.trailingAnchor.constraint(equalTo: background.trailingAnchor),
-            hosting.view.topAnchor.constraint(equalTo: background.topAnchor)
-        ])
         panel.contentView = background
         panel.delegate = self
         panel.title = "MacStatus 指标面板"
@@ -79,6 +70,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         anchorButton = button
         // Before measuring, so data read for the page (the app list, sessions) is part of the first size.
         startReading(for: model.page)
+        mountContent()
         guard positionPanel(), startObservingDismissal() else {
             hide()
             return
@@ -89,6 +81,8 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     func hide() {
         stopObservingDismissal()
         panel.orderOut(nil)
+        hosting?.view.removeFromSuperview()
+        hosting = nil
         anchorButton = nil
         targetFrame = nil
         monitor.setPanelDemand(.hidden)
@@ -99,6 +93,21 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         subscriptions.removeAll()
         hide()
         panel.close()
+    }
+
+    private func mountContent() {
+        let hosting = NSHostingController(rootView: StatusPanelView(monitor: monitor, model: model, cleanup: cleanup, ai: ai))
+        // The controller sizes and places the panel; SwiftUI only sizes its own view, which is pinned to the
+        // top so that content changing ahead of the panel's resize stays in place instead of shifting.
+        hosting.sizingOptions = [.intrinsicContentSize]
+        hosting.view.translatesAutoresizingMaskIntoConstraints = false
+        background.addSubview(hosting.view)
+        NSLayoutConstraint.activate([
+            hosting.view.leadingAnchor.constraint(equalTo: background.leadingAnchor),
+            hosting.view.trailingAnchor.constraint(equalTo: background.trailingAnchor),
+            hosting.view.topAnchor.constraint(equalTo: background.topAnchor)
+        ])
+        self.hosting = hosting
     }
 
     /// What the open panel reads follows the page it shows.
@@ -131,7 +140,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
 
     @discardableResult
     private func positionPanel() -> Bool {
-        guard let anchor = anchorRect,
+        guard let hosting, let anchor = anchorRect,
               let screen = NSScreen.screens.first(where: {
                   $0.frame.contains(NSPoint(x: anchor.midX, y: anchor.midY))
               }) else { return false }

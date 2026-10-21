@@ -67,14 +67,18 @@ struct ClaudeQuotaTests {
         return Data(#"{"claudeAiOauth":{"accessToken":"token","refreshToken":"refresh"\#(expiry),"scopes":["user:inference"]}}"#.utf8)
     }
 
-    @Test func usesTheTokenUntilItExpires() {
-        #expect(ClaudeQuota.accessToken(fromCredentials: credentials(expiresAt: now.timeIntervalSince1970 + 60), now: now) == .success("token"))
-        #expect(ClaudeQuota.accessToken(fromCredentials: credentials(expiresAt: nil), now: now) == .success("token"))
-        #expect(ClaudeQuota.accessToken(fromCredentials: credentials(expiresAt: now.timeIntervalSince1970), now: now) == .failure(.expired))
+    @Test func readsTheTokenAndWhenItExpires() throws {
+        let token = try ClaudeQuota.accessToken(fromCredentials: credentials(expiresAt: now.timeIntervalSince1970 + 60)).get()
+        #expect(token.value == "token")
+        #expect(!token.hasExpired(at: now))
+        #expect(token.hasExpired(at: now.addingTimeInterval(60)))
+        let lasting = try ClaudeQuota.accessToken(fromCredentials: credentials(expiresAt: nil)).get()
+        #expect(lasting.expiresAt == nil)
+        #expect(!lasting.hasExpired(at: now))
     }
 
     @Test func credentialsWithoutAClaudeSignInAreUnavailable() {
-        guard case .failure(.unavailable) = ClaudeQuota.accessToken(fromCredentials: Data(#"{"other":{}}"#.utf8), now: now) else {
+        guard case .failure(.unavailable) = ClaudeQuota.accessToken(fromCredentials: Data(#"{"other":{}}"#.utf8)) else {
             Issue.record("expected unavailable")
             return
         }

@@ -49,7 +49,6 @@ struct MetricCard<Content: View>: View {
                 Text(value)
                     .font(.system(size: 22, weight: .semibold, design: .rounded))
                     .monospacedDigit()
-                    .contentTransition(.numericText())
             }
             content
         }

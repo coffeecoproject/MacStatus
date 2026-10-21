@@ -32,6 +32,7 @@ final class AIModel: ObservableObject {
     @Published private(set) var claude = QuotaState()
 
     private let home = FileManager.default.homeDirectoryForCurrentUser
+    private let claudeQuota = ClaudeQuota()
     private var loop: Task<Void, Never>?
     private var codexAttemptedAt: Date?
     private var claudeAttemptedAt: Date?
@@ -96,7 +97,7 @@ final class AIModel: ObservableObject {
         claudeAttemptedAt = Date()
         claude.isUpdating = true
         Task {
-            claude.apply(await ClaudeQuota.fetch())
+            claude.apply(await claudeQuota.fetch())
         }
     }
 }
