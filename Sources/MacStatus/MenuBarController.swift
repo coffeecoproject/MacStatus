@@ -39,6 +39,7 @@ final class MenuBarController: NSObject {
             ])
         }
 
+        monitor.setMenuBarMetrics(Set(selection))
         subscription = monitor.$snapshot.sink { [weak self] snapshot in
             self?.render(snapshot)
         }
@@ -114,6 +115,7 @@ final class MenuBarController: NSObject {
             metrics.append(metric)
         }
         selection = metrics
+        monitor.setMenuBarMetrics(Set(metrics))
         renderedTexts = nil
         render(monitor.snapshot)
     }

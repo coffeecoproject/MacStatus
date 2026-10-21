@@ -22,19 +22,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         menuBar = MenuBarController(monitor: monitor)
 
+        // Nothing is shown while the system sleeps or the displays are off, so nothing is sampled.
         let notifications = NSWorkspace.shared.notificationCenter
-        notifications.addObserver(
-            self,
-            selector: #selector(willSleep),
-            name: NSWorkspace.willSleepNotification,
-            object: nil
-        )
-        notifications.addObserver(
-            self,
-            selector: #selector(didWake),
-            name: NSWorkspace.didWakeNotification,
-            object: nil
-        )
+        for name in [NSWorkspace.willSleepNotification, NSWorkspace.screensDidSleepNotification] {
+            notifications.addObserver(self, selector: #selector(pause), name: name, object: nil)
+        }
+        for name in [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification] {
+            notifications.addObserver(self, selector: #selector(resume), name: name, object: nil)
+        }
         monitor.start()
     }
 
@@ -44,11 +39,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBar?.invalidate()
     }
 
-    @objc private func willSleep(_ notification: Notification) {
+    @objc private func pause(_ notification: Notification) {
         monitor.pause()
     }
 
-    @objc private func didWake(_ notification: Notification) {
+    @objc private func resume(_ notification: Notification) {
         monitor.start()
     }
 }

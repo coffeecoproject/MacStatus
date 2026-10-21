@@ -30,6 +30,13 @@ public struct TemperatureReading: Sendable, Equatable {
     public let thermalPressure: ThermalPressure
 }
 
+/// Which sensors a read covers. Each sensor is a driver call of about 0.15 ms, and most are GPU sensors.
+public enum TemperatureScope: Sendable, Equatable {
+    /// CPU sensors only; the GPU, SSD and battery come back empty.
+    case cpu
+    case all
+}
+
 /// SMC sensor groups on Apple Silicon. Keys are discovered at runtime instead of a per-model list.
 enum TemperatureSensorGroup: Sendable, Equatable {
     case cpu
@@ -83,7 +90,7 @@ public final class TemperatureReader {
 
     public init() {}
 
-    public func read() throws(MetricError) -> TemperatureReading {
+    public func read(_ scope: TemperatureScope) throws(MetricError) -> TemperatureReading {
         #if !arch(arm64)
         throw .unavailable
         #else
@@ -108,8 +115,9 @@ public final class TemperatureReader {
         self.connection = connection
         self.sensors = sensors
 
+        let wanted = sensors.filter { scope == .all || $0.group == .cpu }
         var samples: [(group: TemperatureSensorGroup, celsius: Double)] = []
-        for sensor in sensors {
+        for sensor in wanted {
             // A single sensor may be momentarily unreadable; the group summary skips it.
             if let celsius = try? connection.float(for: sensor.key) {
                 samples.append((sensor.group, celsius))
@@ -118,7 +126,7 @@ public final class TemperatureReader {
         let thermal = ThermalPressure(ProcessInfo.processInfo.thermalState)
         guard let reading = TemperatureAggregator.reading(samples, thermal: thermal) else {
             // Every read failing points at a broken connection; keep the discovered keys.
-            if samples.isEmpty, !sensors.isEmpty { self.connection = nil }
+            if samples.isEmpty, !wanted.isEmpty { self.connection = nil }
             throw .unavailable
         }
         return reading

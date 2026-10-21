@@ -85,7 +85,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         hosting = nil
         anchorButton = nil
         targetFrame = nil
-        monitor.setPanelDemand(.hidden)
+        monitor.setPanelDemand(.menuBarOnly)
         ai.setActive(false)
     }
 
@@ -112,7 +112,13 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
 
     /// What the open panel reads follows the page it shows.
     private func startReading(for page: PanelPage) {
-        monitor.setPanelDemand(page == .processes ? .processes : .metrics)
+        let demand: PanelDemand = switch page {
+        case .overview: .overview
+        case .processes: .processes
+        case .cleanup: .cleanup
+        case .ai: .menuBarOnly
+        }
+        monitor.setPanelDemand(demand)
         ai.setActive(page == .ai)
     }
 

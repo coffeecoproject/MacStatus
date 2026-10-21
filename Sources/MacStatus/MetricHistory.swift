@@ -27,6 +27,16 @@ struct MetricHistory: Equatable {
         }
     }
 
+    /// For a series no longer sampled, so the gap is not drawn as a line across it.
+    mutating func clear(_ series: Series) {
+        switch series {
+        case .cpu: cpu = []
+        case .diskRead: diskRead = []
+        case .diskWrite: diskWrite = []
+        case .temperature: temperature = []
+        }
+    }
+
     private static func append(_ value: Double, at time: Date, to points: inout [HistoryPoint]) {
         let cutoff = time.addingTimeInterval(-window)
         points.removeAll { $0.time < cutoff }
