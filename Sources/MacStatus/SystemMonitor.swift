@@ -36,11 +36,10 @@ private actor TemperatureSampler {
 
 /// What the open panel shows, besides the menu bar's own metrics.
 enum PanelDemand: Equatable {
-    /// The panel is closed or shows a page without system metrics.
+    /// The panel is closed.
     case menuBarOnly
     case overview
     case memory
-    case cleanup
 }
 
 /// What each tick reads and how often: the menu bar's metrics, plus what the open page shows.
@@ -77,8 +76,6 @@ struct Sampling: Equatable {
             memory = true
             apps = true
             interval = Self.panelInterval
-        case .cleanup:
-            disk = true
         }
     }
 }

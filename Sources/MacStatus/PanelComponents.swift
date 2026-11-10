@@ -201,24 +201,15 @@ struct ListSection<Rows: View, Footer: View>: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
-            ListCard { rows }
+            VStack(spacing: 0) { rows }
+                .background(Color.primary.opacity(0.05))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             VStack(alignment: .leading, spacing: 2) { footer }
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
         }
         .padding(.top, 6)
-    }
-}
-
-/// Rows on a card background; row highlights follow its rounded corners.
-struct ListCard<Content: View>: View {
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        VStack(spacing: 0) { content }
-            .background(Color.primary.opacity(0.05))
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 

@@ -9,7 +9,6 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
 
     private let monitor: SystemMonitor
     private let model = PanelModel()
-    private let cleanup = CleanupModel()
     private let background = NSVisualEffectView()
     /// Exists only while the panel is shown: a SwiftUI view left in the hidden panel would still follow every
     /// refresh, laying out and drawing for nobody to see.
@@ -94,7 +93,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     }
 
     private func mountContent() {
-        let hosting = NSHostingController(rootView: StatusPanelView(monitor: monitor, model: model, cleanup: cleanup))
+        let hosting = NSHostingController(rootView: StatusPanelView(monitor: monitor, model: model))
         // The controller sizes and places the panel; SwiftUI only sizes its own view, which is pinned to the
         // top so that content changing ahead of the panel's resize stays in place instead of shifting.
         hosting.sizingOptions = [.intrinsicContentSize]
@@ -113,7 +112,6 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         let demand: PanelDemand = switch page {
         case .overview: .overview
         case .memory: .memory
-        case .cleanup: .cleanup
         }
         monitor.setPanelDemand(demand)
     }

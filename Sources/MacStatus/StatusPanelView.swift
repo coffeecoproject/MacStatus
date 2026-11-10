@@ -4,21 +4,19 @@ import SwiftUI
 enum PanelPage: Hashable {
     case overview
     case memory
-    case cleanup
 }
 
 /// Panel UI state the controller observes to resize the panel and tell the monitor what to sample.
 @MainActor
 final class PanelModel: ObservableObject {
     @Published var page = PanelPage.overview
-    /// Laid-out height of the content, whatever changed it (data, page, a section folding).
+    /// Laid-out height of the content, whatever changed it (data or page).
     @Published var contentHeight: CGFloat = 0
 }
 
 struct StatusPanelView: View {
     @ObservedObject var monitor: SystemMonitor
     @ObservedObject var model: PanelModel
-    let cleanup: CleanupModel
 
     var body: some View {
         let snapshot = monitor.snapshot
@@ -26,7 +24,6 @@ struct StatusPanelView: View {
             Picker("页面", selection: $model.page) {
                 Text("概览").tag(PanelPage.overview)
                 Text("内存").tag(PanelPage.memory)
-                Text("清理").tag(PanelPage.cleanup)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -47,8 +44,6 @@ struct StatusPanelView: View {
                 )
             case .memory:
                 MemoryPage(memory: snapshot.memory, apps: snapshot.apps)
-            case .cleanup:
-                CleanupPage(disk: snapshot.disk, cleanup: cleanup)
             }
             footer(updatedAt: snapshot.updatedAt)
         }

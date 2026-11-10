@@ -27,10 +27,5 @@ struct SamplingTests {
         #expect(memory.memory && memory.apps && !memory.cpu && !memory.disk && !memory.network)
         #expect(memory.temperature == .cpu)
         #expect(memory.interval == Sampling.panelInterval)
-
-        let cleanup = Sampling(demand: .cleanup, menuBar: [.memory, .network])
-        #expect(cleanup.disk && cleanup.memory && cleanup.network && !cleanup.cpu && !cleanup.apps)
-        #expect(cleanup.temperature == nil)
-        #expect(cleanup.interval == Sampling.menuBarInterval)
     }
 }
