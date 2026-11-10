@@ -10,7 +10,6 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     private let monitor: SystemMonitor
     private let model = PanelModel()
     private let cleanup = CleanupModel()
-    private let ai = AIModel()
     private let background = NSVisualEffectView()
     /// Exists only while the panel is shown: a SwiftUI view left in the hidden panel would still follow every
     /// refresh, laying out and drawing for nobody to see.
@@ -68,7 +67,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
             return
         }
         anchorButton = button
-        // Before measuring, so data read for the page (the app list, sessions) is part of the first size.
+        // Before measuring, so data read for the page (the app list) is part of the first size.
         startReading(for: model.page)
         mountContent()
         guard positionPanel(), startObservingDismissal() else {
@@ -86,7 +85,6 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         anchorButton = nil
         targetFrame = nil
         monitor.setPanelDemand(.menuBarOnly)
-        ai.setActive(false)
     }
 
     func invalidate() {
@@ -96,7 +94,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     }
 
     private func mountContent() {
-        let hosting = NSHostingController(rootView: StatusPanelView(monitor: monitor, model: model, cleanup: cleanup, ai: ai))
+        let hosting = NSHostingController(rootView: StatusPanelView(monitor: monitor, model: model, cleanup: cleanup))
         // The controller sizes and places the panel; SwiftUI only sizes its own view, which is pinned to the
         // top so that content changing ahead of the panel's resize stays in place instead of shifting.
         hosting.sizingOptions = [.intrinsicContentSize]
@@ -116,10 +114,8 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         case .overview: .overview
         case .memory: .memory
         case .cleanup: .cleanup
-        case .ai: .menuBarOnly
         }
         monitor.setPanelDemand(demand)
-        ai.setActive(page == .ai)
     }
 
     private func pageChanged(to page: PanelPage) {

@@ -24,7 +24,7 @@ public struct AppMemoryUsage: Sendable, Equatable, Identifiable {
 struct ProcessSample: Sendable, Equatable {
     let path: String
     /// Executable of the process responsible for this one, when that is another process.
-    var responsiblePath: String?
+    let responsiblePath: String?
     let footprint: UInt64
 
     init(path: String, responsiblePath: String? = nil, footprint: UInt64) {
@@ -113,7 +113,7 @@ public final class AppMemoryReader {
 
 /// Which process macOS holds responsible for another, as privacy prompts and Activity Monitor use it: the app
 /// on whose behalf a system XPC service runs, or the terminal a command was started from.
-private enum Responsibility {
+enum Responsibility {
     typealias Function = @convention(c) (pid_t) -> pid_t
 
     /// Private but exported by libsystem. Looked up at run time (in every loaded image: `RTLD_DEFAULT`, which
@@ -121,4 +121,28 @@ private enum Responsibility {
     /// toward the bundle they run from only.
     static let responsiblePID: Function? = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "responsibility_get_pid_responsible_for_pid")
         .map { unsafeBitCast($0, to: Function.self) }
+}
+
+enum ProcessList {
+    /// Every pid on the system; reading details of other users' processes fails for them individually.
+    static func pids() throws(MetricError) -> [pid_t] {
+        let capacity = proc_listallpids(nil, 0)
+        guard capacity > 0 else { throw .systemFailure(code: errno) }
+        // Slack for processes started between the two calls.
+        var pids = [pid_t](repeating: 0, count: Int(capacity) + 64)
+        let count = pids.withUnsafeMutableBytes { proc_listallpids($0.baseAddress, Int32($0.count)) }
+        guard count > 0 else { throw .systemFailure(code: errno) }
+        return pids.prefix(Int(count)).filter { $0 > 0 }
+    }
+
+    /// Physical footprint, including compressed and swapped-out pages, like Activity Monitor's "Memory".
+    static func footprint(pid: pid_t) -> UInt64? {
+        var info = rusage_info_v4()
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) {
+                proc_pid_rusage(pid, RUSAGE_INFO_V4, $0)
+            }
+        }
+        return result == 0 ? info.ri_phys_footprint : nil
+    }
 }

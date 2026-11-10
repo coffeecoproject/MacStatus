@@ -8,6 +8,8 @@ struct MemoryPage: View {
 
     var body: some View {
         let reading = memory.value
+        // Empty unless the list is ready; the switch below tells loading and failure apart.
+        let listing = AppListing(apps.value ?? [], total: reading?.total)
         MetricCard(
             title: "内存", symbol: "memorychip", tint: .green,
             value: reading.map { Format.percent($0.usedFraction) } ?? Format.placeholder,
@@ -31,10 +33,10 @@ struct MemoryPage: View {
                 ListPlaceholder(text: "正在读取…")
             case .unavailable:
                 ListPlaceholder(text: "无法读取 App 列表")
-            case .ready(let usages):
+            case .ready:
                 let shown = listing.shown
                 if shown.isEmpty {
-                    ListPlaceholder(text: usages.isEmpty ? "没有正在运行的 App" : "没有占用较多内存的 App")
+                    ListPlaceholder(text: listing.otherCount == 0 ? "没有正在运行的 App" : "没有占用较多内存的 App")
                 }
                 // The list is sorted, so the first is the largest.
                 let largest = shown.first?.footprint
@@ -47,12 +49,8 @@ struct MemoryPage: View {
             if listing.otherCount > 0 {
                 Text("另有 \(listing.otherCount) 个 App 共 \(Format.memory(listing.otherFootprint)) 未列出。")
             }
-            Text("按内存占用列出前 \(AppListing.limit) 个，含压缩与交换，不到总内存 1% 的不列出。App 的辅助进程和代它运行的进程（如网页内容、虚拟机、终端里的命令）计入该 App；后台、菜单栏与系统进程不列出。")
+            Text("按内存占用列出前 \(AppListing.limit) 个，含压缩与交换，不到总内存 \(Format.percent(AppListing.minimumShare)) 的不列出。App 的辅助进程和代它运行的进程（如网页内容、虚拟机、终端里的命令）计入该 App；后台、菜单栏与系统进程不列出。")
         }
-    }
-
-    private var listing: AppListing {
-        AppListing(apps.value ?? [], total: memory.value?.total)
     }
 }
 

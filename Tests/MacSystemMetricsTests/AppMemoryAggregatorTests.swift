@@ -1,3 +1,4 @@
+import Darwin
 import Testing
 @testable import MacSystemMetrics
 
@@ -60,6 +61,12 @@ struct AppMemoryAggregatorTests {
 
         #expect(top.map(\.bundlePath) == [claude, terminal])
         #expect(top.map(\.footprint) == [300, 50])
+    }
+
+    /// The lookup degrades quietly by design, so this is what notices a macOS that dropped it.
+    @Test func theResponsibilityLookupIsAvailable() throws {
+        let responsiblePID = try #require(Responsibility.responsiblePID)
+        #expect(responsiblePID(getpid()) > 0)
     }
 
     @Test func leavesOutProcessesOutsideTheListedApps() {
