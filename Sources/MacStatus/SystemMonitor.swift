@@ -17,8 +17,9 @@ struct MonitorSnapshot: Equatable {
     var cpu: MetricState<CPUReading> = .loading
     var memory: MetricState<MemoryReading> = .loading
     var disk: MetricState<DiskReading> = .loading
+    var network: MetricState<NetworkReading> = .loading
     var temperature: MetricState<TemperatureReading> = .loading
-    /// Read only while the process page is open.
+    /// Read only while the memory page is open.
     var apps: MetricState<[AppMemoryUsage]> = .loading
     var history = MetricHistory()
     var updatedAt: Date?
@@ -50,6 +51,7 @@ struct Sampling: Equatable {
     var cpu = false
     var memory = false
     var disk = false
+    var network = false
     /// Nil when temperature is not read.
     var temperature: TemperatureScope?
     var apps = false
@@ -59,6 +61,7 @@ struct Sampling: Equatable {
         cpu = menuBar.contains(.cpu)
         memory = menuBar.contains(.memory)
         disk = menuBar.contains(.disk)
+        network = menuBar.contains(.network)
         temperature = menuBar.contains(.temperature) ? .cpu : nil
         switch demand {
         case .menuBarOnly:
@@ -67,6 +70,7 @@ struct Sampling: Equatable {
             cpu = true
             memory = true
             disk = true
+            network = true
             temperature = .all
             interval = Self.panelInterval
         case .memory:
@@ -81,7 +85,7 @@ struct Sampling: Equatable {
 
 @MainActor
 final class SystemMonitor: ObservableObject {
-    /// Spacing used while a delta (CPU, disk rates) has no baseline yet.
+    /// Spacing used while a delta (CPU, disk and network rates) has no baseline yet.
     static let minimumSpacing: Duration = .milliseconds(500)
     static let temperatureTimeout: Duration = .seconds(3)
 
@@ -93,6 +97,7 @@ final class SystemMonitor: ObservableObject {
     private let cpu = CPUReader()
     private let memory = MemoryReader()
     private let disk = DiskReader()
+    private let network = NetworkReader()
     private let apps = AppMemoryReader()
     private let thermal = TemperatureSampler()
     private var demand = PanelDemand.menuBarOnly
@@ -112,6 +117,7 @@ final class SystemMonitor: ObservableObject {
         // Deltas must not span a pause or sleep.
         cpu.reset()
         disk.reset()
+        network.reset()
         tick()
         loop = Task {
             while !Task.isCancelled {
@@ -174,6 +180,17 @@ final class SystemMonitor: ObservableObject {
             next.history.clear(.diskWrite)
         default: break
         }
+        switch (previous.network, sampling.network) {
+        case (false, true):
+            readNetwork(into: &next, at: now)
+            startedDelta = true
+        case (true, false):
+            network.reset()
+            next.network = .loading
+            next.history.clear(.download)
+            next.history.clear(.upload)
+        default: break
+        }
         if sampling.temperature == nil {
             finishedTemperature = nil
             shownTemperature = nil
@@ -197,6 +214,7 @@ final class SystemMonitor: ObservableObject {
         if sampling.cpu { readCPU(into: &next, at: now) }
         if sampling.memory { readMemory(into: &next) }
         if sampling.disk { readDisk(into: &next, at: now) }
+        if sampling.network { readNetwork(into: &next, at: now) }
         if sampling.apps { next.apps = readApps() }
         if let finished = finishedTemperature {
             finishedTemperature = nil
@@ -243,6 +261,17 @@ final class SystemMonitor: ObservableObject {
             }
         } catch {
             next.disk = .unavailable
+        }
+    }
+
+    private func readNetwork(into next: inout MonitorSnapshot, at now: Date) {
+        let reading = network.read()
+        next.network = .ready(reading)
+        if let download = reading.downloadRate, let upload = reading.uploadRate {
+            next.history.append(download, to: .download, at: now)
+            next.history.append(upload, to: .upload, at: now)
+        } else {
+            hurry = true
         }
     }
 

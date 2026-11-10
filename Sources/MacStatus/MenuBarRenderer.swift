@@ -5,6 +5,7 @@ enum MenuBarMetric: String, CaseIterable {
     case temperature
     case memory
     case disk
+    case network
 
     static let defaultSelection: [MenuBarMetric] = [.cpu, .temperature]
 
@@ -14,6 +15,7 @@ enum MenuBarMetric: String, CaseIterable {
         case .temperature: "CPU 温度"
         case .memory: "内存使用率"
         case .disk: "硬盘使用率"
+        case .network: "网络速率"
         }
     }
 
@@ -23,12 +25,17 @@ enum MenuBarMetric: String, CaseIterable {
         case .temperature: "thermometer.medium"
         case .memory: "memorychip"
         case .disk: "internaldrive"
+        case .network: "network"
         }
     }
 
     /// Widest expected text, so the item does not shift as digits change.
     var widthTemplate: String {
-        self == .temperature ? "100°" : "100%"
+        switch self {
+        case .temperature: "100°"
+        case .network: "↓999K ↑999K"
+        default: "100%"
+        }
     }
 
     func text(_ snapshot: MonitorSnapshot) -> String {
@@ -37,6 +44,11 @@ enum MenuBarMetric: String, CaseIterable {
         case .temperature: snapshot.temperature.value?.cpu.map { "\(Int($0.maximum.rounded()))°" }
         case .memory: snapshot.memory.value.map { Format.percent($0.usedFraction) }
         case .disk: snapshot.disk.value.map { Format.percent($0.usedFraction) }
+        case .network: snapshot.network.value.flatMap { reading in
+            reading.downloadRate.flatMap { download in
+                reading.uploadRate.map { "↓\(Format.compactRate(download)) ↑\(Format.compactRate($0))" }
+            }
+        }
         }
         return text ?? Format.placeholder
     }

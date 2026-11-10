@@ -178,6 +178,52 @@ struct DiskCard: View {
     }
 }
 
+struct NetworkCard: View {
+    let state: MetricState<NetworkReading>
+    let downloadHistory: [HistoryPoint]
+    let uploadHistory: [HistoryPoint]
+
+    // Incoming and outgoing, in the disk card's colors for reading and writing.
+    private static let downloadColor = Color.teal
+    private static let uploadColor = Color.pink
+
+    var body: some View {
+        let reading = state.value
+        MetricCard(
+            title: "网络", symbol: "network", tint: .blue,
+            value: reading?.downloadRate.map(Format.rate) ?? Format.placeholder,
+            caption: reading.map { connection($0.connection) },
+            badge: unavailableBadge(state),
+            trend: Sparkline(
+                series: [
+                    .init(id: "download", points: downloadHistory, color: Self.downloadColor),
+                    .init(id: "upload", points: uploadHistory, color: Self.uploadColor)
+                ],
+                domain: Sparkline.domain(for: [downloadHistory, uploadHistory], minimum: 100_000)
+            )
+        ) {
+            DetailGrid(items: [
+                DetailItem(
+                    label: "下载", value: reading?.downloadRate.map(Format.rate) ?? Format.placeholder,
+                    color: Self.downloadColor
+                ),
+                DetailItem(
+                    label: "上传", value: reading?.uploadRate.map(Format.rate) ?? Format.placeholder,
+                    color: Self.uploadColor
+                )
+            ])
+        }
+    }
+
+    private func connection(_ connection: NetworkConnection) -> String {
+        switch connection {
+        case .hardware(let name): name
+        case .other: "经 VPN 或其他连接"
+        case .offline: "未连接"
+        }
+    }
+}
+
 struct TemperatureCard: View {
     let state: MetricState<TemperatureReading>
     let history: [HistoryPoint]

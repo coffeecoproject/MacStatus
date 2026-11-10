@@ -12,10 +12,12 @@ struct MetricHistory: Equatable {
     private(set) var cpu: [HistoryPoint] = []
     private(set) var diskRead: [HistoryPoint] = []
     private(set) var diskWrite: [HistoryPoint] = []
+    private(set) var download: [HistoryPoint] = []
+    private(set) var upload: [HistoryPoint] = []
     private(set) var temperature: [HistoryPoint] = []
 
     enum Series {
-        case cpu, diskRead, diskWrite, temperature
+        case cpu, diskRead, diskWrite, download, upload, temperature
     }
 
     mutating func append(_ value: Double, to series: Series, at time: Date) {
@@ -23,6 +25,8 @@ struct MetricHistory: Equatable {
         case .cpu: Self.append(value, at: time, to: &cpu)
         case .diskRead: Self.append(value, at: time, to: &diskRead)
         case .diskWrite: Self.append(value, at: time, to: &diskWrite)
+        case .download: Self.append(value, at: time, to: &download)
+        case .upload: Self.append(value, at: time, to: &upload)
         case .temperature: Self.append(value, at: time, to: &temperature)
         }
     }
@@ -33,6 +37,8 @@ struct MetricHistory: Equatable {
         case .cpu: cpu = []
         case .diskRead: diskRead = []
         case .diskWrite: diskWrite = []
+        case .download: download = []
+        case .upload: upload = []
         case .temperature: temperature = []
         }
     }

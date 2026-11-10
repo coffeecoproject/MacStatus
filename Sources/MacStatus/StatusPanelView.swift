@@ -40,6 +40,11 @@ struct StatusPanelView: View {
                     readHistory: snapshot.history.diskRead,
                     writeHistory: snapshot.history.diskWrite
                 )
+                NetworkCard(
+                    state: snapshot.network,
+                    downloadHistory: snapshot.history.download,
+                    uploadHistory: snapshot.history.upload
+                )
             case .memory:
                 MemoryPage(memory: snapshot.memory, apps: snapshot.apps)
             case .cleanup:

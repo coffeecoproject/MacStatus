@@ -22,6 +22,22 @@ enum Format {
         Int64(bytesPerSecond.rounded()).formatted(.byteCount(style: .file)) + "/s"
     }
 
+    /// For the menu bar, in decimal units and at most four characters: "0K", "35K", "1.2M", "12M".
+    static func compactRate(_ bytesPerSecond: Double) -> String {
+        let units = ["K", "M", "G"]
+        var value = bytesPerSecond / 1000
+        var unit = 0
+        while value >= 999.5, unit < units.count - 1 {
+            value /= 1000
+            unit += 1
+        }
+        // Kilobytes have no decimal: the menu bar has no room, and below 1 MB/s it says little.
+        let digits = unit > 0 && value < 9.95
+            ? value.formatted(.number.precision(.fractionLength(1)).locale(Locale(identifier: "en_US_POSIX")))
+            : "\(Int(value.rounded()))"
+        return digits + units[unit]
+    }
+
     static func celsius(_ value: Double) -> String {
         "\(Int(value.rounded()))°C"
     }

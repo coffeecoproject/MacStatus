@@ -4,32 +4,32 @@ import Testing
 struct SamplingTests {
     @Test func aClosedPanelReadsOnlyTheMenuBarsMetrics() {
         let sampling = Sampling(demand: .menuBarOnly, menuBar: [.cpu, .temperature])
-        #expect(sampling.cpu && !sampling.memory && !sampling.disk && !sampling.apps)
+        #expect(sampling.cpu && !sampling.memory && !sampling.disk && !sampling.network && !sampling.apps)
         #expect(sampling.temperature == .cpu)
         #expect(sampling.interval == Sampling.menuBarInterval)
     }
 
     @Test func anEmptyMenuBarReadsNothing() {
         let sampling = Sampling(demand: .menuBarOnly, menuBar: [])
-        #expect(!sampling.cpu && !sampling.memory && !sampling.disk && !sampling.apps)
+        #expect(!sampling.cpu && !sampling.memory && !sampling.disk && !sampling.network && !sampling.apps)
         #expect(sampling.temperature == nil)
     }
 
     @Test func theOverviewReadsEverySensorEveryPanelInterval() {
         let sampling = Sampling(demand: .overview, menuBar: [])
-        #expect(sampling.cpu && sampling.memory && sampling.disk && !sampling.apps)
+        #expect(sampling.cpu && sampling.memory && sampling.disk && sampling.network && !sampling.apps)
         #expect(sampling.temperature == .all)
         #expect(sampling.interval == Sampling.panelInterval)
     }
 
     @Test func pagesAddWhatTheyShowToTheMenuBarsMetrics() {
         let memory = Sampling(demand: .memory, menuBar: [.temperature])
-        #expect(memory.memory && memory.apps && !memory.cpu && !memory.disk)
+        #expect(memory.memory && memory.apps && !memory.cpu && !memory.disk && !memory.network)
         #expect(memory.temperature == .cpu)
         #expect(memory.interval == Sampling.panelInterval)
 
-        let cleanup = Sampling(demand: .cleanup, menuBar: [.memory])
-        #expect(cleanup.disk && cleanup.memory && !cleanup.cpu && !cleanup.apps)
+        let cleanup = Sampling(demand: .cleanup, menuBar: [.memory, .network])
+        #expect(cleanup.disk && cleanup.memory && cleanup.network && !cleanup.cpu && !cleanup.apps)
         #expect(cleanup.temperature == nil)
         #expect(cleanup.interval == Sampling.menuBarInterval)
     }
