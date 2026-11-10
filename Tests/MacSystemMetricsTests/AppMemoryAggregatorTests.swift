@@ -6,13 +6,13 @@ struct AppMemoryAggregatorTests {
     private let docker = "/Applications/Docker.app"
 
     @Test func helpersCountTowardTheirOutermostApp() throws {
-        let top = AppMemoryAggregator.top([
+        let top = AppMemoryAggregator.usages([
             ProcessSample(path: "\(claude)/Contents/MacOS/Claude", footprint: 300),
             ProcessSample(
                 path: "\(claude)/Contents/Frameworks/Claude Helper (Renderer).app/Contents/MacOS/Claude Helper (Renderer)",
                 footprint: 900
             )
-        ], apps: [claude], limit: 5)
+        ], apps: [claude])
 
         let app = try #require(top.first)
         #expect(top.count == 1)
@@ -22,26 +22,70 @@ struct AppMemoryAggregatorTests {
         #expect(app.footprint == 1_200)
     }
 
-    @Test func leavesOutProcessesOutsideTheListedApps() {
-        let top = AppMemoryAggregator.top([
-            ProcessSample(path: "/opt/homebrew/bin/node", footprint: 5_000),
-            ProcessSample(path: "/System/Library/Frameworks/Virtualization.framework/XPCServices/VM.xpc/Contents/MacOS/VM", footprint: 4_000),
-            ProcessSample(path: "/Library/Input Methods/SogouInput.app/Contents/MacOS/SogouInput", footprint: 3_000),
-            ProcessSample(path: "\(docker)/Contents/MacOS/Docker Desktop.app/Contents/MacOS/Docker Desktop", footprint: 100)
-        ], apps: [docker], limit: 5)
+    @Test func processesRunFromElsewhereCountTowardTheAppResponsibleForThem() throws {
+        let safari = "/Applications/Safari.app"
+        let top = AppMemoryAggregator.usages([
+            ProcessSample(path: "\(safari)/Contents/MacOS/Safari", footprint: 100),
+            ProcessSample(
+                path: "/System/Library/Frameworks/WebKit.framework/XPCServices/com.apple.WebKit.WebContent.xpc/Contents/MacOS/com.apple.WebKit.WebContent",
+                responsiblePath: "\(safari)/Contents/MacOS/Safari",
+                footprint: 700
+            ),
+            ProcessSample(
+                path: "/System/Library/Frameworks/Virtualization.framework/XPCServices/VM.xpc/Contents/MacOS/VM",
+                responsiblePath: "\(docker)/Contents/MacOS/com.docker.backend",
+                footprint: 4_000
+            )
+        ], apps: [safari, docker])
 
-        #expect(top.map(\.bundlePath) == [docker])
-        #expect(AppMemoryAggregator.top([
-            ProcessSample(path: "\(claude)/Contents/MacOS/Claude", footprint: 1)
-        ], apps: [], limit: 5).isEmpty)
+        #expect(top.map(\.bundlePath) == [docker, safari])
+        #expect(top.map(\.footprint) == [4_000, 800])
+        #expect(try #require(top.last).processCount == 2)
     }
 
-    @Test func keepsOnlyTheLargestApps() {
-        let bundles = (1...8).map { "/Applications/A\($0).app" }
+    @Test func aProcessRunFromAListedAppCountsTowardItWhoeverIsResponsible() {
+        let terminal = "/System/Applications/Utilities/Terminal.app"
+        let top = AppMemoryAggregator.usages([
+            ProcessSample(
+                path: "\(claude)/Contents/MacOS/Claude",
+                responsiblePath: "\(terminal)/Contents/MacOS/Terminal",
+                footprint: 300
+            ),
+            ProcessSample(
+                path: "/opt/homebrew/bin/node",
+                responsiblePath: "\(terminal)/Contents/MacOS/Terminal",
+                footprint: 50
+            )
+        ], apps: [claude, terminal])
+
+        #expect(top.map(\.bundlePath) == [claude, terminal])
+        #expect(top.map(\.footprint) == [300, 50])
+    }
+
+    @Test func leavesOutProcessesOutsideTheListedApps() {
+        let top = AppMemoryAggregator.usages([
+            ProcessSample(path: "/opt/homebrew/bin/node", footprint: 5_000),
+            ProcessSample(
+                path: "/System/Library/Frameworks/Virtualization.framework/XPCServices/VM.xpc/Contents/MacOS/VM",
+                responsiblePath: "/Applications/Menu Bar Tool.app/Contents/MacOS/tool",
+                footprint: 4_000
+            ),
+            ProcessSample(path: "/Library/Input Methods/SogouInput.app/Contents/MacOS/SogouInput", footprint: 3_000),
+            ProcessSample(path: "\(docker)/Contents/MacOS/Docker Desktop.app/Contents/MacOS/Docker Desktop", footprint: 100)
+        ], apps: [docker])
+
+        #expect(top.map(\.bundlePath) == [docker])
+        #expect(AppMemoryAggregator.usages([
+            ProcessSample(path: "\(claude)/Contents/MacOS/Claude", footprint: 1)
+        ], apps: []).isEmpty)
+    }
+
+    @Test func sortsTheAppsLargestFirst() {
+        let bundles = (1...4).map { "/Applications/A\($0).app" }
         let samples = bundles.enumerated().map {
             ProcessSample(path: "\($1)/Contents/MacOS/a", footprint: UInt64($0 + 1) * 10)
         }
-        #expect(AppMemoryAggregator.top(samples, apps: Set(bundles), limit: 3).map(\.footprint) == [80, 70, 60])
+        #expect(AppMemoryAggregator.usages(samples, apps: Set(bundles)).map(\.footprint) == [40, 30, 20, 10])
     }
 
     @Test(arguments: [

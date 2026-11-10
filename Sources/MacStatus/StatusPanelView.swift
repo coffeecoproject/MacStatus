@@ -3,7 +3,7 @@ import SwiftUI
 
 enum PanelPage: Hashable {
     case overview
-    case processes
+    case memory
     case cleanup
     case ai
 }
@@ -27,7 +27,7 @@ struct StatusPanelView: View {
         VStack(spacing: 8) {
             Picker("页面", selection: $model.page) {
                 Text("概览").tag(PanelPage.overview)
-                Text("进程").tag(PanelPage.processes)
+                Text("内存").tag(PanelPage.memory)
                 Text("清理").tag(PanelPage.cleanup)
                 Text("AI").tag(PanelPage.ai)
             }
@@ -43,8 +43,8 @@ struct StatusPanelView: View {
                     readHistory: snapshot.history.diskRead,
                     writeHistory: snapshot.history.diskWrite
                 )
-            case .processes:
-                ProcessPage(memory: snapshot.memory, apps: snapshot.apps)
+            case .memory:
+                MemoryPage(memory: snapshot.memory, apps: snapshot.apps)
             case .cleanup:
                 CleanupPage(disk: snapshot.disk, cleanup: cleanup)
             case .ai:

@@ -38,7 +38,7 @@ enum PanelDemand: Equatable {
     /// The panel is closed or shows a page without system metrics.
     case menuBarOnly
     case overview
-    case processes
+    case memory
     case cleanup
 }
 
@@ -69,7 +69,7 @@ struct Sampling: Equatable {
             disk = true
             temperature = .all
             interval = Self.panelInterval
-        case .processes:
+        case .memory:
             memory = true
             apps = true
             interval = Self.panelInterval
@@ -84,7 +84,6 @@ final class SystemMonitor: ObservableObject {
     /// Spacing used while a delta (CPU, disk rates) has no baseline yet.
     static let minimumSpacing: Duration = .milliseconds(500)
     static let temperatureTimeout: Duration = .seconds(3)
-    static let appLimit = 10
 
     @Published private(set) var snapshot = MonitorSnapshot()
     private(set) var sampling = Sampling(demand: .menuBarOnly, menuBar: [])
@@ -249,7 +248,7 @@ final class SystemMonitor: ObservableObject {
 
     private func readApps() -> MetricState<[AppMemoryUsage]> {
         do {
-            return .ready(try apps.read(apps: QuittableApps.bundlePaths(), limit: Self.appLimit))
+            return .ready(try apps.read(apps: QuittableApps.bundlePaths()))
         } catch {
             return .unavailable
         }

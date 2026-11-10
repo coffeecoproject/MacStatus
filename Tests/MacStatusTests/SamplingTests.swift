@@ -23,10 +23,10 @@ struct SamplingTests {
     }
 
     @Test func pagesAddWhatTheyShowToTheMenuBarsMetrics() {
-        let processes = Sampling(demand: .processes, menuBar: [.temperature])
-        #expect(processes.memory && processes.apps && !processes.cpu && !processes.disk)
-        #expect(processes.temperature == .cpu)
-        #expect(processes.interval == Sampling.panelInterval)
+        let memory = Sampling(demand: .memory, menuBar: [.temperature])
+        #expect(memory.memory && memory.apps && !memory.cpu && !memory.disk)
+        #expect(memory.temperature == .cpu)
+        #expect(memory.interval == Sampling.panelInterval)
 
         let cleanup = Sampling(demand: .cleanup, menuBar: [.memory])
         #expect(cleanup.disk && cleanup.memory && !cleanup.cpu && !cleanup.apps)

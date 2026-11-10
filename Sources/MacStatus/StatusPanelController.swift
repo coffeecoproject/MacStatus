@@ -114,7 +114,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     private func startReading(for page: PanelPage) {
         let demand: PanelDemand = switch page {
         case .overview: .overview
-        case .processes: .processes
+        case .memory: .memory
         case .cleanup: .cleanup
         case .ai: .menuBarOnly
         }
