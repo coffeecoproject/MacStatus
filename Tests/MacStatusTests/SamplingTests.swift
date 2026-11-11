@@ -27,5 +27,10 @@ struct SamplingTests {
         #expect(memory.memory && memory.apps && !memory.cpu && !memory.disk && !memory.network)
         #expect(memory.temperature == .cpu)
         #expect(memory.interval == Sampling.panelInterval)
+
+        let tasks = Sampling(demand: .tasks, menuBar: [.cpu])
+        #expect(tasks.tasks && tasks.cpu && !tasks.memory && !tasks.apps && !tasks.disk && !tasks.network)
+        #expect(tasks.interval == Sampling.panelInterval)
+        #expect(!memory.tasks && !Sampling(demand: .overview, menuBar: []).tasks)
     }
 }

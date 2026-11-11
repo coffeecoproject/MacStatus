@@ -13,6 +13,14 @@ struct FormatTests {
         #expect(Format.loadAverage([]) == Format.placeholder)
     }
 
+    @Test func elapsedTimeGrowsCoarser() {
+        #expect(Format.elapsed(-5) == "不到 1 分钟")
+        #expect(Format.elapsed(59) == "不到 1 分钟")
+        #expect(Format.elapsed(3 * 60) == "3 分钟")
+        #expect(Format.elapsed(115 * 60) == "1 小时 55 分")
+        #expect(Format.elapsed((52 * 60 + 10) * 60) == "2 天 4 小时")
+    }
+
     @Test func compactRatesFitTheMenuBar() {
         #expect(Format.compactRate(0) == "0K")
         #expect(Format.compactRate(35_400) == "35K")

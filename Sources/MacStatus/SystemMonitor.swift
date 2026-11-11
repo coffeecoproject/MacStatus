@@ -21,6 +21,8 @@ struct MonitorSnapshot: Equatable {
     var temperature: MetricState<TemperatureReading> = .loading
     /// Read only while the memory page is open.
     var apps: MetricState<[AppMemoryUsage]> = .loading
+    /// Read only while the tasks page is open.
+    var tasks: MetricState<[AgentTask]> = .loading
     var history = MetricHistory()
     var updatedAt: Date?
 }
@@ -40,6 +42,7 @@ enum PanelDemand: Equatable {
     case menuBarOnly
     case overview
     case memory
+    case tasks
 }
 
 /// What each tick reads and how often: the menu bar's metrics, plus what the open page shows.
@@ -54,6 +57,7 @@ struct Sampling: Equatable {
     /// Nil when temperature is not read.
     var temperature: TemperatureScope?
     var apps = false
+    var tasks = false
     var interval = Sampling.menuBarInterval
 
     init(demand: PanelDemand, menuBar: Set<MenuBarMetric>) {
@@ -76,6 +80,9 @@ struct Sampling: Equatable {
             memory = true
             apps = true
             interval = Self.panelInterval
+        case .tasks:
+            tasks = true
+            interval = Self.panelInterval
         }
     }
 }
@@ -89,13 +96,14 @@ final class SystemMonitor: ObservableObject {
     @Published private(set) var snapshot = MonitorSnapshot()
     private(set) var sampling = Sampling(demand: .menuBarOnly, menuBar: [])
 
-    // Kernel counters take microseconds and the app list a few milliseconds, so they are read on the main
+    // Kernel counters take microseconds and the app and task lists a few milliseconds, so they are read on the main
     // actor: whatever the panel starts showing is read in the same update that shows it.
     private let cpu = CPUReader()
     private let memory = MemoryReader()
     private let disk = DiskReader()
     private let network = NetworkReader()
     private let apps = AppMemoryReader()
+    private let tasks = AgentTaskReader()
     private let thermal = TemperatureSampler()
     private var demand = PanelDemand.menuBarOnly
     private var menuBar: Set<MenuBarMetric> = []
@@ -195,6 +203,7 @@ final class SystemMonitor: ObservableObject {
             next.history.clear(.temperature)
         }
         next.apps = sampling.apps ? readApps() : .loading
+        next.tasks = sampling.tasks ? readTasks() : .loading
         snapshot = next
         if startedDelta { lastTick = .now }
         guard loop != nil else { return }
@@ -213,6 +222,7 @@ final class SystemMonitor: ObservableObject {
         if sampling.disk { readDisk(into: &next, at: now) }
         if sampling.network { readNetwork(into: &next, at: now) }
         if sampling.apps { next.apps = readApps() }
+        if sampling.tasks { next.tasks = readTasks() }
         if let finished = finishedTemperature {
             finishedTemperature = nil
             apply(finished.result, at: finished.at, to: &next)
@@ -275,6 +285,14 @@ final class SystemMonitor: ObservableObject {
     private func readApps() -> MetricState<[AppMemoryUsage]> {
         do {
             return .ready(try apps.read(apps: QuittableApps.bundlePaths()))
+        } catch {
+            return .unavailable
+        }
+    }
+
+    private func readTasks() -> MetricState<[AgentTask]> {
+        do {
+            return .ready(try tasks.read())
         } catch {
             return .unavailable
         }

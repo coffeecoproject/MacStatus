@@ -112,6 +112,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         let demand: PanelDemand = switch page {
         case .overview: .overview
         case .memory: .memory
+        case .tasks: .tasks
         }
         monitor.setPanelDemand(demand)
     }

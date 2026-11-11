@@ -4,6 +4,7 @@ import SwiftUI
 enum PanelPage: Hashable {
     case overview
     case memory
+    case tasks
 }
 
 /// Panel UI state the controller observes to resize the panel and tell the monitor what to sample.
@@ -24,6 +25,7 @@ struct StatusPanelView: View {
             Picker("页面", selection: $model.page) {
                 Text("概览").tag(PanelPage.overview)
                 Text("内存").tag(PanelPage.memory)
+                Text("任务").tag(PanelPage.tasks)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -44,6 +46,8 @@ struct StatusPanelView: View {
                 )
             case .memory:
                 MemoryPage(memory: snapshot.memory, apps: snapshot.apps)
+            case .tasks:
+                TasksPage(tasks: snapshot.tasks)
             }
             footer(updatedAt: snapshot.updatedAt)
         }

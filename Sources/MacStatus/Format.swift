@@ -38,6 +38,15 @@ enum Format {
         return digits + units[unit]
     }
 
+    /// How long something has been running: "不到 1 分钟", "3 分钟", "1 小时 55 分", "2 天 4 小时".
+    static func elapsed(_ interval: TimeInterval) -> String {
+        let minutes = max(Int(interval / 60), 0)
+        if minutes == 0 { return "不到 1 分钟" }
+        if minutes < 60 { return "\(minutes) 分钟" }
+        if minutes < 1440 { return "\(minutes / 60) 小时 \(minutes % 60) 分" }
+        return "\(minutes / 1440) 天 \(minutes / 60 % 24) 小时"
+    }
+
     static func celsius(_ value: Double) -> String {
         "\(Int(value.rounded()))°C"
     }
